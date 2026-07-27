@@ -29,6 +29,10 @@
           "host": "IP-адрес",
           "port": "Порт"
         }
+      },
+      "reauth_confirm": {
+        "title": "Повторное сопряжение {name}",
+        "description": "Колонке {name} ({host}) требуется повторная авторизация (например, после сброса к заводским настройкам).\n\n**Нажмите кнопку «+» на колонке**, затем подтвердите.\n\n(Таймаут: {timeout} секунд)"
       }
     },
     "error": {
@@ -37,13 +41,29 @@
     },
     "abort": {
       "already_configured": "Эта колонка уже добавлена.",
-      "incomplete_discovery": "Обнаруженный сервис не содержит ID устройства."
+      "incomplete_discovery": "Обнаруженный сервис не содержит ID устройства.",
+      "reauth_successful": "Повторная авторизация выполнена.",
+      "reconfigure_successful": "Настройки обновлены."
     }
   },
   "issues": {
     "speaker_unreachable": {
       "title": "Колонка {name} недоступна",
-      "description": "Колонка не отвечает уже {minutes} мин. Проверьте питание, сеть и IP-адрес. Если IP сменился — перенастройте через Settings → Integrations → SBoom → ⋮ → Reconfigure."
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Колонка {name} недоступна",
+            "description": "Если колонка получила новый IP-адрес (например, от DHCP) — введите его ниже: pair-токен сохраняется, повторное сопряжение не нужно. Убедитесь, что колонка включена и доступна из сети Home Assistant.",
+            "data": {
+              "host": "IP-адрес",
+              "port": "Порт"
+            }
+          }
+        },
+        "error": {
+          "cannot_connect": "Не удалось подключиться по этому адресу. Проверьте IP/порт и доступность колонки в локальной сети."
+        }
+      }
     }
   },
   "options": {
@@ -55,37 +75,65 @@
           "volume_poll_interval": "Интервал опроса громкости, сек",
           "keepalive_interval": "Интервал WebSocket keepalive, сек",
           "availability_threshold": "Порог недоступности (неудачных reconnect'ов)",
-          "lyrics_enabled": "Загружать synced lyrics с Lrclib.net"
+          "lyrics_enabled": "Загружать synced lyrics с Lrclib.net",
+          "lyrics_netease_fallback": "Использовать NetEase как резервный источник текстов",
+          "lyrics_offset": "Сдвиг текста песни, секунды (+ раньше / − позже)",
+          "karaoke_fill": "Караоке-закраска (подсветка строки по мере пропевания)",
+          "panel_enabled": "Показывать панель плеера в боковом меню"
         }
       }
     }
   },
   "entity": {
     "button": {
-      "next_track":      { "name": "Следующий трек" },
-      "previous_track":  { "name": "Предыдущий трек" },
-      "play_pause":      { "name": "Воспроизведение / Пауза" },
-      "like":            { "name": "Лайк текущему треку" },
-      "dislike":         { "name": "Дизлайк текущему треку" },
-      "remove_like":     { "name": "Убрать лайк" },
-      "remove_dislike":  { "name": "Убрать дизлайк" },
-      "bt_pairing":      { "name": "Bluetooth-сопряжение" },
-      "find_remote":     { "name": "Найти пульт" }
+      "next_track": {
+        "name": "Следующий трек"
+      },
+      "previous_track": {
+        "name": "Предыдущий трек"
+      },
+      "play_pause": {
+        "name": "Воспроизведение / Пауза"
+      },
+      "like": {
+        "name": "Лайк текущему треку"
+      },
+      "dislike": {
+        "name": "Дизлайк текущему треку"
+      },
+      "remove_like": {
+        "name": "Убрать лайк"
+      },
+      "remove_dislike": {
+        "name": "Убрать дизлайк"
+      },
+      "bt_pairing": {
+        "name": "Bluetooth-сопряжение"
+      },
+      "find_remote": {
+        "name": "Найти пульт"
+      }
     },
     "number": {
-      "volume": { "name": "Громкость" }
+      "volume": {
+        "name": "Громкость"
+      }
     },
     "switch": {
-      "shuffle": { "name": "Перемешивание" },
-      "mute":    { "name": "Без звука" }
+      "shuffle": {
+        "name": "Перемешивание"
+      },
+      "mute": {
+        "name": "Без звука"
+      }
     },
     "select": {
       "repeat": {
         "name": "Режим повтора",
         "state": {
-          "off":       "Выкл.",
-          "playlist":  "Плейлист",
-          "track":     "Трек"
+          "off": "Выкл.",
+          "playlist": "Плейлист",
+          "track": "Трек"
         }
       },
       "playback_speed": {
@@ -93,32 +141,226 @@
       }
     },
     "sensor": {
-      "lyrics_current_line":  { "name": "Текущая строка lyrics" },
-      "lyrics":               { "name": "Lyrics" },
-      "led_brightness":       { "name": "Яркость дисплея" },
-      "alarms":               { "name": "Будильники" },
-      "timers":               { "name": "Таймеры" },
-      "active_app":           { "name": "Активное приложение" },
-      "assistant_character":  { "name": "Персона ассистента" },
-      "multiroom_mode":       { "name": "Режим multiroom" },
-      "network_type":         { "name": "Тип подключения" },
-      "paired_bt":            { "name": "Спаренные Bluetooth-устройства" }
+      "lyrics_current_line": {
+        "name": "Текущая строка lyrics"
+      },
+      "lyrics": {
+        "name": "Lyrics",
+        "state": {
+          "no_track": "Нет трека",
+          "loading": "Загрузка",
+          "available": "Найден",
+          "instrumental": "Инструментал",
+          "not_found": "Не найден"
+        }
+      },
+      "led_brightness": {
+        "name": "Яркость дисплея"
+      },
+      "alarms": {
+        "name": "Будильники"
+      },
+      "timers": {
+        "name": "Таймеры"
+      },
+      "active_app": {
+        "name": "Активное приложение"
+      },
+      "assistant_character": {
+        "name": "Персона ассистента"
+      },
+      "playback_mode": {
+        "name": "Режим воспроизведения"
+      },
+      "multiroom_mode": {
+        "name": "Режим multiroom"
+      },
+      "device_links": {
+        "name": "Связанные устройства"
+      },
+      "network_type": {
+        "name": "Тип подключения"
+      },
+      "paired_bt": {
+        "name": "Спаренные Bluetooth-устройства"
+      },
+      "ip_address": {
+        "name": "IP-адрес"
+      },
+      "timezone": {
+        "name": "Часовой пояс"
+      },
+      "age_mode": {
+        "name": "Возрастной режим"
+      },
+      "clock_skew": {
+        "name": "Рассинхрон часов с Home Assistant"
+      },
+      "coordinates": {
+        "name": "Координаты"
+      },
+      "next_alarm": {
+        "name": "Следующий будильник"
+      },
+      "next_timer": {
+        "name": "Следующий таймер"
+      },
+      "firmware_channel": {
+        "name": "Канал прошивки"
+      },
+      "foreground_app": {
+        "name": "Приложение на экране"
+      },
+      "illuminance": {
+        "name": "Освещённость"
+      },
+      "soc_temperature": {
+        "name": "Температура SoC"
+      },
+      "zigbee_inventory": {
+        "name": "Zigbee-устройства"
+      },
+      "matter_inventory": {
+        "name": "Matter-устройства"
+      }
     },
     "binary_sensor": {
-      "led_display":          { "name": "Дисплей" },
-      "active":               { "name": "Активна" },
-      "stereo_pair":          { "name": "Стереопара" },
-      "subscription_device":  { "name": "Устройство подписки" },
-      "home_security":        { "name": "Домашняя безопасность" },
-      "morning_show":         { "name": "Утреннее шоу" }
+      "led_display": {
+        "name": "Дисплей"
+      },
+      "active": {
+        "name": "Активна"
+      },
+      "stereo_pair": {
+        "name": "Стереопара"
+      },
+      "subscription_device": {
+        "name": "Устройство подписки"
+      },
+      "home_security": {
+        "name": "Домашняя безопасность"
+      },
+      "morning_show": {
+        "name": "Утреннее шоу"
+      },
+      "alarm_ringing": {
+        "name": "Будильник звонит"
+      },
+      "track_has_lyrics": {
+        "name": "У трека есть текст"
+      },
+      "assistant_auto_volume": {
+        "name": "Автогромкость ассистента"
+      },
+      "proactivity_notification": {
+        "name": "Проактивное уведомление ассистента"
+      }
     },
     "camera": {
-      "lyrics_camera": { "name": "Lyrics на ТВ" }
+      "lyrics_camera": {
+        "name": "Lyrics на ТВ"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Местоположение"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Расписание"
+      }
     }
   },
   "exceptions": {
     "command_failed": {
       "message": "Не удалось выполнить «{action}»: колонка недоступна ({error})"
+    },
+    "no_loaded_speakers": {
+      "message": "Ни одна загруженная колонка SBoom не подходит под этот вызов. Проверьте, что интеграция настроена и устройство указано верно."
+    }
+  },
+  "services": {
+    "refresh_metadata": {
+      "name": "Обновить метаданные",
+      "description": "Принудительно запросить текущий трек и состояние колонки, не дожидаясь poll-цикла.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom (по умолчанию — все настроенные)."
+        }
+      }
+    },
+    "reauth": {
+      "name": "Повторная авторизация (re-pair)",
+      "description": "Запустить повторную привязку. После вызова сервиса нажмите кнопку «+» на корпусе колонки.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom для переавторизации."
+        }
+      }
+    },
+    "bluetooth_device": {
+      "name": "Команда Bluetooth-устройству",
+      "description": "Подключить, отключить или удалить спаренное Bluetooth-устройство колонки.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom (по умолчанию — все настроенные)."
+        },
+        "mac_address": {
+          "name": "MAC-адрес",
+          "description": "MAC Bluetooth-устройства (см. атрибут devices сенсора «Спаренные Bluetooth-устройства»)."
+        },
+        "command": {
+          "name": "Команда",
+          "description": "Действие над устройством."
+        }
+      }
+    },
+    "play_music": {
+      "name": "Воспроизвести музыку",
+      "description": "Запустить контент на колонке по ссылке zvuk.com, поисковому запросу или id + типу.",
+      "fields": {
+        "device_id": {
+          "name": "Устройство",
+          "description": "Колонка SberBoom (по умолчанию — все настроенные)."
+        },
+        "url": {
+          "name": "Ссылка",
+          "description": "Ссылка zvuk.com (напр. https://zvuk.com/track/84279897)."
+        },
+        "query": {
+          "name": "Запрос",
+          "description": "Поисковый запрос — будет запущен первый подходящий результат."
+        },
+        "id": {
+          "name": "ID",
+          "description": "Каталожный id контента (вместе с полем «Тип»)."
+        },
+        "kind": {
+          "name": "Тип",
+          "description": "Тип контента для id: track / artist / release / playlist / podcast / abook."
+        }
+      }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "track_changed": "Сменился трек",
+      "playback_changed": "Изменилось воспроизведение",
+      "volume_changed": "Изменилась громкость",
+      "connection_changed": "Изменилась связь"
+    },
+    "action_type": {
+      "play": "Воспроизвести",
+      "pause": "Пауза",
+      "next": "Следующий трек",
+      "previous": "Предыдущий трек",
+      "refresh_metadata": "Обновить метаданные",
+      "find_remote": "Найти пульт",
+      "bt_pairing": "Bluetooth-сопряжение"
     }
   }
 }

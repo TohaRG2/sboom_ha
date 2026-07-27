@@ -23,9 +23,13 @@ def async_register(
 
 
 async def system_health_info(hass: HomeAssistant) -> dict[str, Any]:
-    coords: dict[str, SboomCoordinator] = hass.data.get(DOMAIN, {})
+    coords: list[SboomCoordinator] = [
+        entry.runtime_data
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if isinstance(getattr(entry, "runtime_data", None), SboomCoordinator)
+    ]
     total = len(coords)
-    connected = sum(1 for c in coords.values() if c.connected)
+    connected = sum(1 for c in coords if c.connected)
 
     return {
         "configured_speakers": total,

@@ -1,0 +1,990 @@
+// Протокол StarOS (:20000 WSS), реконструкция из клиента. protobuf 3.10.
+// Имена строковых полей — реальные; типы message резолвнуты где возможно
+// (25 полей, помечены '←'); имена не-строковых полей и часть типов — TBD.
+syntax = "proto3";
+package ru.sber.staros.protobuf;
+
+message Alarm {
+  string id = 1;
+  string sound_id = 2;
+  int32 field3 = 3; // int32/enum
+  bool field6 = 6;
+  repeated Alarm_AlarmAction field7 = 7; // ← Alarm.AlarmAction
+  oneof payload {
+    Alarm_Timer field4 = 4; // ← Alarm.Timer
+    Alarm_AlarmClock field5 = 5; // ← Alarm.AlarmClock
+  }
+}
+
+message AlarmPlaybackControl {
+  bytes field1 = 1; // <sub-message> TBD
+  string alarm_id = 2;
+  bool field3 = 3;
+}
+
+message AlarmRemoved {
+  string id = 1;
+}
+
+message AppSettings {
+  bytes field1 = 1; // <sub-message> TBD
+  string app_settings_json = 2;
+}
+
+message AppSettingsByFrontendEndpoint {
+  string app_frontend_endpoint = 1;
+  string app_settings_json = 2;
+}
+
+message AppSettingsByFrontendEndpointRequest {
+  string app_frontend_endpoint = 1;
+}
+
+message AppState {
+  string id = 1;
+  string state = 2;
+}
+
+message AssistantError {
+  int32 field1 = 1; // int32/enum
+  string text = 2;
+  int32 field3 = 3; // int32/enum
+  int32 field4 = 4; // int32/enum
+  int32 field5 = 5; // int32/enum
+  string tech_text = 6;
+  bytes field7 = 7; // <sub-message> TBD
+  int32 field8 = 8; // int32/enum
+}
+
+message AssistantInfo {
+  int32 field1 = 1; // int32/enum
+  string text = 2;
+  int32 field3 = 3; // int32/enum
+  string character = 4;
+  bool field5 = 5;
+  string mic_type = 6;
+  string surface = 7;
+  string user_id = 8;
+  string user_channel = 9;
+  bool field10 = 10;
+}
+
+message AssistantPlayerStart {
+  bytes field1 = 1; // <sub-message> TBD
+  SmartAppInfo field2 = 2; // ← SmartAppInfo
+  string payload = 3;
+}
+
+message AssistantSpeech {
+  string text = 1;
+}
+
+message BLESetupDevice {
+  string name = 1;
+  string device_id = 2;
+  string device_type = 3;
+  string device_serial_number = 4;
+}
+
+message BackendAuthState {
+  bool field1 = 1;
+  string auth_token = 2;
+  string backendUrl = 3;
+  int32 field4 = 4; // int32/enum
+  int32 field7 = 7; // int32/enum
+  int32 field8 = 8; // int32/enum
+}
+
+message Backup {
+  string id = 1;
+  string path = 2;
+}
+
+message BaseSmartAppCommand {
+  bytes field1 = 1; // <sub-message> TBD
+  SmartAppInfo field2 = 2; // ← SmartAppInfo
+  string payload = 3;
+}
+
+message BiometricUser {
+  string colonkish_id = 1;
+}
+
+message BluetoothDevice {
+  string name = 1;
+  int32 field2 = 2; // int32/enum
+  int32 field3 = 3; // int32/enum
+  int32 field4 = 4; // int32/enum
+  string address = 5;
+}
+
+message BugReport {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message CommonConfig {
+  string config = 1;
+}
+
+message Contact {
+  string first_name = 1;
+  string last_name = 2;
+  string vendor_id = 4;
+  string contact_id = 5;
+  string user_id = 6;
+  oneof payload {
+    string telegram_id = 3;
+  }
+}
+
+message ContentVendor {
+  string vendor = 1;
+  string id = 2;
+}
+
+message Deeplink {
+  bytes field1 = 1; // <sub-message> TBD
+  string deeplink = 2;
+}
+
+message DeviceAssistantInfo {
+  string user_channel = 1;
+  string surface = 2;
+  string device_ram = 3;
+  string device_cpu = 4;
+  string child_mode = 5;
+}
+
+message DeviceGroupChangedEvent {
+  string old_device_group = 1;
+  string new_device_group = 2;
+}
+
+message DeviceInfo {
+  string device_id = 1;
+  string version = 2;
+  string vendor = 3;
+  string product = 4;
+  string brand_name = 5;
+  string display_name = 6;
+  string user_agent_postfix = 7;
+  bool field8 = 8;
+  string surface = 9;
+  string device_serial_number = 10;
+}
+
+message DownloadSettings {
+  string url = 1;
+  int32 field2 = 2; // int32/enum
+  string download_dir = 3;
+  DownloadSettings_RsaVerification field4 = 4; // ← DownloadSettings.RsaVerification
+  int32 field5 = 5; // int32/enum
+  int32 field6 = 6; // int32/enum
+  repeated bytes field7 = 7; // <sub-message> TBD
+  int32 field8 = 8; // int32/enum
+  bool field9 = 9;
+}
+
+message DownloadStatus {
+  string name = 1;
+  DownloadSettings field2 = 2; // ← DownloadSettings
+  int32 field3 = 3; // int32/enum
+  int32 field4 = 4; // int32/enum
+  int32 field5 = 5; // int32/enum
+  string path = 6;
+  bool field7 = 7;
+  int32 field8 = 8; // int32/enum
+  string owner = 9;
+}
+
+message DownloadedUpdateInfo {
+  string version = 1;
+  bool field2 = 2;
+  string file_path = 3;
+  int32 field4 = 4; // int32/enum
+  Metadata field5 = 5; // ← Metadata
+  int32 field6 = 6; // int32/enum
+}
+
+message EnvironmentInfo {
+  string name = 1;
+  string config = 2;
+}
+
+message EnvironmentsInfo {
+  bytes field1 = 1; // <sub-message> TBD
+  repeated string available_environments = 2;
+}
+
+message EsaAuthState {
+  int32 field1 = 1; // int32/enum
+  string user_code = 2;
+  string verification_uri = 3;
+  bool field4 = 4;
+  bool field5 = 5;
+  string access_token = 6;
+  int32 field8 = 8; // int32/enum
+  string refresh_token = 9;
+  string esa_backend_url = 10;
+  string esa_client_id = 11;
+  int32 field12 = 12; // int32/enum
+  string device_serial_number = 13;
+}
+
+message EsaAuthUpdate {
+  oneof payload {
+    string access_token = 1;
+    bool field2 = 2;
+  }
+}
+
+message EthernetInfo {
+  int32 field1 = 1; // int32/enum
+  string ip = 2;
+  string mask = 3;
+  string gateway = 4;
+  repeated string dns = 5;
+}
+
+message ExpiredEsaToken {
+  string token = 1;
+}
+
+message ExternalIp {
+  int32 field1 = 1; // int32/enum
+  string ip = 2;
+  string url = 3;
+}
+
+message GamepadSessionConnectionInfo {
+  string session_id = 1;
+  int32 field2 = 2; // int32/enum
+  string service_version = 3;
+  string aes_key = 4;
+}
+
+message GamepadSessionRequest {
+  string session_id = 1;
+  string client_name = 2;
+  string client_ip = 3;
+}
+
+message GetDeviceGroupEvent {
+  string current_device_group = 1;
+}
+
+message GroupManagementMessage {
+  bytes field1 = 1; // <sub-message> TBD
+  int32 field2 = 2; // int32/enum
+  string group_id = 10;
+  string device_id = 11;
+  bytes field12 = 12;
+  string source_device_id = 13;
+  oneof payload {
+    bytes field3 = 3; // <sub-message> TBD
+    bytes field4 = 4; // <sub-message> TBD
+    bytes field5 = 5; // <sub-message> TBD
+    bytes field6 = 6; // <sub-message> TBD
+    bytes field7 = 7; // <sub-message> TBD
+    bytes field8 = 8; // <sub-message> TBD
+    bytes field9 = 9; // <sub-message> TBD
+  }
+}
+
+message HdmiEdid {
+  string hex = 1;
+  string ptm = 2;
+  string screen_size = 3;
+  string manufacturer_description = 4;
+  string manufacturer = 5;
+  string product_name = 6;
+  int32 field7 = 7; // int32/enum
+  bool field10 = 10;
+}
+
+message LauncherOpenItem {
+  string application = 1;
+}
+
+message Location {
+  fixed64 field1 = 1;
+  fixed64 field2 = 2;
+  fixed32 field3 = 3;
+  string type = 4;
+  int32 field5 = 5; // int32/enum
+  string provider = 6;
+}
+
+message Metadata {
+  string contents = 1;
+}
+
+message MultiRoomCommand {
+  string command_id = 1;
+  oneof payload {
+    bytes field2 = 2; // <sub-message> TBD
+    bytes field3 = 3; // <sub-message> TBD
+    MultiRoomCommand_CreatePlayer field4 = 4; // ← MultiRoomCommand.CreatePlayer
+    bytes field5 = 5; // <sub-message> TBD
+    bytes field6 = 6; // <sub-message> TBD
+    bytes field7 = 7; // <sub-message> TBD
+    bytes field8 = 8; // <sub-message> TBD
+  }
+}
+
+message MultiRoomMessage {
+  bytes field1 = 1; // <sub-message> TBD
+  string master_cast_device_id = 2;
+  int32 field10 = 10; // int32/enum
+  string mr_sesssion_id = 11;
+  oneof payload {
+    MultiRoomState field3 = 3; // ← MultiRoomState
+    MultiRoomCommand field4 = 4; // ← MultiRoomCommand
+    StereoPairMessage field5 = 5; // ← StereoPairMessage
+    bytes field6 = 6; // <sub-message> TBD
+    bytes field7 = 7; // <sub-message> TBD
+    bytes field8 = 8; // <sub-message> TBD
+    bytes field9 = 9; // <sub-message> TBD
+  }
+}
+
+message MultiRoomState {
+  string music_state = 1;
+  bool field2 = 2;
+}
+
+message MusicAlarmInfo {
+  string payload = 1;
+  int32 field2 = 2; // int32/enum
+  string music_info = 3;
+}
+
+message NotificationMessage {
+  string message_id = 1;
+  int32 field2 = 2; // int32/enum
+  string title = 3;
+  string text = 4;
+  string positive_button_text = 5;
+  string negative_button_text = 6;
+  string image_uri = 7;
+  int32 field8 = 8; // int32/enum
+  int32 field9 = 9; // int32/enum
+  bool field10 = 10;
+  string deep_link = 11;
+  bool field12 = 12;
+}
+
+message NotificationResultMessage {
+  string message_id = 1;
+  bool field2 = 2;
+  bool field3 = 3;
+  bool field4 = 4;
+}
+
+message PartnerTokenRequest {
+  string partner_id = 1;
+  string app_id = 2;
+}
+
+message PartnerTokenResult {
+  string partner_id = 1;
+  oneof payload {
+    PartnerTokenResult_PartnerToken field2 = 2; // ← PartnerTokenResult.PartnerToken
+    PartnerTokenResult_Error field3 = 3; // ← PartnerTokenResult.Error
+  }
+}
+
+message PauseAlarm {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message PauseTimer {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message PayDialog {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message PtpInfo {
+  int32 field1 = 1; // int32/enum
+  string clock_identity = 2;
+  string parent_clock_identity = 3;
+}
+
+message PushNotification {
+  string push_id = 3;
+  oneof payload {
+    bytes field1 = 1; // <sub-message> TBD
+    SmartAppPush field2 = 2; // ← SmartAppPush
+  }
+}
+
+message RemoteMicDevice {
+  string cast_device_id = 1;
+  int32 field2 = 2; // int32/enum
+  string device_name = 3;
+  bool field4 = 4;
+}
+
+message RemoveAlarmClock {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message RemoveClock {
+  bytes field1 = 1; // <sub-message> TBD
+  repeated string ids = 2;
+}
+
+message RemoveTimer {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message ReportEvent {
+  string event_name = 1;
+  string event_value = 2;
+  repeated bytes field3 = 3; // <sub-message> TBD
+  bool field4 = 4;
+}
+
+message ResumeAlarm {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message ResumeTimer {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message RunAppBlocked {
+  int32 field1 = 1; // int32/enum
+  int32 field2 = 2; // int32/enum
+  int32 field3 = 3; // int32/enum
+  string silence_name = 4;
+}
+
+message SaluteID {
+  oneof payload {
+    string sid = 1;
+    bytes field2 = 2; // <sub-message> TBD
+  }
+}
+
+message SberCastClientStatus {
+  string client_name = 1;
+  bool field2 = 2;
+}
+
+message SberCastConnectionEstablished {
+  bytes field1 = 1; // <sub-message> TBD
+  string sender_sbercast_id = 2;
+  string sender_staros_id = 3;
+  string sender_staros_type = 4;
+  repeated string sender_ipv4 = 5;
+}
+
+message SberCastConnectionEstablishedEvent {
+  string sender_sbercast_id = 1;
+  string sender_staros_id = 2;
+  string sender_staros_type = 3;
+  repeated string sender_ipv4 = 4;
+}
+
+message ScreenState {
+  int32 field1 = 1; // int32/enum
+  string state = 2;
+  int32 field3 = 3; // int32/enum
+  bytes field4 = 4; // <sub-message> TBD
+  string application_id = 5;
+  string deeplink = 6;
+  string uuid = 7;
+  int32 field8 = 8; // int32/enum
+  int32 field9 = 9; // int32/enum
+}
+
+message ServerAction {
+  string app_id = 1;
+  string payload = 3;
+  SmartAppInfo field4 = 4; // ← SmartAppInfo
+  int32 field5 = 5; // int32/enum
+  int32 field6 = 6; // int32/enum
+  int32 field7 = 7; // int32/enum
+}
+
+message SetAlarmClock {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message SetClock {
+  bytes field1 = 1; // <sub-message> TBD
+  string id = 2;
+  string city = 3;
+  string timezone = 4;
+}
+
+message SetDeviceBackendGroup {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message SetEnvironment {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message SetMusicAlarm {
+  bytes field1 = 1; // <sub-message> TBD
+  repeated string ids = 2;
+  MusicAlarmInfo field3 = 3; // ← MusicAlarmInfo
+}
+
+message SetRemoteMic {
+  string cast_device_id = 1;
+  bool field2 = 2;
+  bool field3 = 3;
+}
+
+message SetSnoozeAlarmClock {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message SetTimer {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message ShowYoutube {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message SilenceModeChanged {
+  int32 field1 = 1; // int32/enum
+  int32 field2 = 2; // int32/enum
+  int32 field3 = 3; // int32/enum
+  string silence_name = 4;
+}
+
+message SmartApp {
+  string id = 1;
+  int32 field2 = 2; // int32/enum
+  string meta = 3;
+  DownloadStatus field4 = 4; // ← DownloadStatus
+  int32 field6 = 6; // int32/enum
+  SmartAppInfo field7 = 7; // ← SmartAppInfo
+  string backup_path = 8;
+  bool field10 = 10;
+  bool field11 = 11;
+}
+
+message SmartAppInfo {
+  string project_id = 1;
+  string application_id = 2;
+  string frontend_endpoint = 3;
+  string frontend_type = 4;
+  string app_version_id = 5;
+  string system_name = 6;
+  string frontend_state_id = 7;
+  string extra = 8;
+  string affiliation_type = 9;
+}
+
+message SmartAppPush {
+  string smart_app_id = 1;
+  int32 field2 = 2; // int32/enum
+  string payload = 3;
+}
+
+message SmartAppUIState {
+  bytes field1 = 1; // <sub-message> TBD
+  string state = 2;
+}
+
+message StarAny {
+  string type_url = 1;
+  bytes value = 2;
+}
+
+message StarMessage {
+  oneof payload {
+    bytes field1 = 1; // <sub-message> TBD
+    bytes field2 = 2; // <sub-message> TBD
+    bytes field3 = 3; // <sub-message> TBD
+    bytes field4 = 4; // <sub-message> TBD
+    bytes field10 = 10; // <sub-message> TBD
+    bytes field11 = 11; // <sub-message> TBD
+    bytes field100 = 100; // <sub-message> TBD
+    bytes field101 = 101; // <sub-message> TBD
+    bytes field102 = 102; // <sub-message> TBD
+    bytes field103 = 103; // <sub-message> TBD
+    bytes field104 = 104; // <sub-message> TBD
+    bytes field105 = 105; // <sub-message> TBD
+    bytes field106 = 106; // <sub-message> TBD
+    bytes field108 = 108; // <sub-message> TBD
+    bytes field109 = 109; // <sub-message> TBD
+    bytes field110 = 110; // <sub-message> TBD
+    bytes field111 = 111; // <sub-message> TBD
+    bytes field112 = 112; // <sub-message> TBD
+    bytes field113 = 113; // <sub-message> TBD
+    bytes field114 = 114; // <sub-message> TBD
+    bytes field115 = 115; // <sub-message> TBD
+    bytes field116 = 116; // <sub-message> TBD
+    bytes field117 = 117; // <sub-message> TBD
+    bytes field118 = 118; // <sub-message> TBD
+    bytes field119 = 119; // <sub-message> TBD
+    bytes field120 = 120; // <sub-message> TBD
+    bytes field121 = 121; // <sub-message> TBD
+    bytes field122 = 122; // <sub-message> TBD
+    bytes field123 = 123; // <sub-message> TBD
+    bytes field124 = 124; // <sub-message> TBD
+    bytes field125 = 125; // <sub-message> TBD
+    bytes field126 = 126; // <sub-message> TBD
+    bytes field127 = 127; // <sub-message> TBD
+    bytes field128 = 128; // <sub-message> TBD
+    bytes field129 = 129; // <sub-message> TBD
+    bytes field130 = 130; // <sub-message> TBD
+    bytes field131 = 131; // <sub-message> TBD
+    bytes field132 = 132; // <sub-message> TBD
+    bytes field133 = 133; // <sub-message> TBD
+    bytes field134 = 134; // <sub-message> TBD
+    bytes field136 = 136; // <sub-message> TBD
+    bytes field137 = 137; // <sub-message> TBD
+    bytes field138 = 138; // <sub-message> TBD
+    bytes field139 = 139; // <sub-message> TBD
+    bytes field140 = 140; // <sub-message> TBD
+    bytes field141 = 141; // <sub-message> TBD
+    bytes field142 = 142; // <sub-message> TBD
+    bytes field143 = 143; // <sub-message> TBD
+    bytes field144 = 144; // <sub-message> TBD
+    bytes field145 = 145; // <sub-message> TBD
+    bytes field146 = 146; // <sub-message> TBD
+    bytes field147 = 147; // <sub-message> TBD
+    bytes field148 = 148; // <sub-message> TBD
+    bytes field149 = 149; // <sub-message> TBD
+    bytes field150 = 150; // <sub-message> TBD
+    bytes field151 = 151; // <sub-message> TBD
+    bytes field152 = 152; // <sub-message> TBD
+    bytes field153 = 153; // <sub-message> TBD
+    bytes field154 = 154; // <sub-message> TBD
+    bytes field155 = 155; // <sub-message> TBD
+  }
+  message BLEEasySetup {
+    int32 field1 = 1; // int32/enum
+    BLESetupDevice field2 = 2; // ← BLESetupDevice
+    string pin_code = 3;
+  }
+  message BLESetMeUp {
+    bytes field1 = 1; // <sub-message> TBD
+    string pin_code = 2;
+    bool field3 = 3;
+    bool field4 = 4;
+  }
+  message BLESetMeUpApproved {
+    string device_name = 1;
+  }
+  message BLESetMeUpInitial {
+    oneof payload {
+      string show_device_name = 1;
+      bytes field2 = 2; // <sub-message> TBD
+    }
+  }
+  message BiZoneData {
+    string data = 1;
+  }
+  message CastOptions {
+    oneof payload {
+      string cast_device_id = 2;
+      string cast_device_type = 3;
+    }
+  }
+  message Directive {
+    string name = 1;
+    string payload = 2;
+    string android_application_id = 3;
+    SmartAppInfo field4 = 4; // ← SmartAppInfo
+    int32 field5 = 5; // int32/enum
+    int32 field6 = 6; // int32/enum
+    string sbercast_client_name = 7;
+    int32 field8 = 8; // int32/enum
+    bool field9 = 9;
+  }
+  message EnableAdb {
+    string password = 1;
+  }
+  message ForceDeleteBiometryVoice {
+    string user_id = 1;
+  }
+  message ForceDeleteBiometryVoiceResponse {
+    string wrapped_response = 1;
+  }
+  message GetAssistantAppInfoRequest {
+    string android_application_id = 1;
+  }
+  message GetDownloadStatus {
+    string name = 1;
+  }
+  message GetSmartAppMetaRequest {
+    string android_application_id = 1;
+  }
+  message GetSmartAppMetaResponse {
+    string meta = 1;
+  }
+  message GetStarosAuthToken {
+    bytes field1 = 1; // <sub-message> TBD
+    string caller_app_id = 2;
+  }
+  message GetStarosAuthTokenResponse {
+    message StarosAuthToken {
+      string token = 1;
+      int32 field2 = 2; // int32/enum
+    }
+    message StarosAuthTokenError {
+      string error = 1;
+    }
+  }
+  message JsonWebToken {
+    string header = 1;
+    string payload = 2;
+    string signature = 3;
+  }
+  message JsonWebTokenSignRequest {
+    string audience = 1;
+  }
+  message LEDInternalRequestRunDynamic {
+    string name = 1;
+  }
+  message LEDInternalRequestRunStatic {
+    string name = 1;
+    bool field2 = 2;
+    bool field3 = 3;
+  }
+  message LEDInternalResponseStaticFinished {
+    string name = 1;
+  }
+  message LEDInternalResponseStaticStarted {
+    string name = 1;
+    int32 field2 = 2; // int32/enum
+    int32 field3 = 3; // int32/enum
+  }
+  message LatencyPoint {
+    string latency_point = 1;
+  }
+  message RemoveDownload {
+    string name = 1;
+  }
+  message RemoveFaceDescriptor {
+    string user_id = 1;
+  }
+  message RemoveMetricsEnvironmentVariable {
+    string key = 1;
+  }
+  message ReportLatency {
+    string latency_point = 1;
+    string event_name = 2;
+    string event_data = 3;
+    bool field4 = 4;
+  }
+  message ReportMessage {
+    string message = 1;
+    int32 field2 = 2; // int32/enum
+  }
+  message Request {
+    string id = 1;
+  }
+  message RequestDiagnosticInfo {
+    string service = 1;
+  }
+  message ResponseDiagnosticInfo {
+    string info = 1;
+  }
+  message SaveSmartAppBackups {
+    message SaveSmartAppBackup {
+      bytes field1 = 1; // <sub-message> TBD
+      string backup_path = 2;
+    }
+  }
+  message SetBiometricPrivacySettings {
+    string user_id = 1;
+    string settings = 2;
+  }
+  message SetBiometricUserAvatar {
+    string user_id = 1;
+    bytes field2 = 2; // <sub-message> TBD
+  }
+  message SetBiometricUserBiometryConfirmed {
+    string user_id = 1;
+    bool field2 = 2;
+  }
+  message SetBiometricUserName {
+    string user_id = 1;
+    string name = 2;
+  }
+  message SetBiometricUserSynchronized {
+    string user_id = 1;
+    bool field2 = 2;
+  }
+  message SetBiometricUserVoiceRegistered {
+    string user_id = 1;
+    bool field2 = 2;
+  }
+  message SetDownload {
+    string name = 1;
+    DownloadSettings field2 = 2; // ← DownloadSettings
+  }
+  message SetFaceDescriptor {
+    string user_id = 1;
+    bytes field2 = 2; // <sub-message> TBD
+  }
+  message SetMetricsEnvironmentVariable {
+    string key = 1;
+    string value = 2;
+  }
+  message SetNextVoiceBiometryCommandResponse {
+    string wrapped_response = 1;
+  }
+  message SetSmartAppState {
+    bytes field1 = 1; // <sub-message> TBD
+    string state = 2;
+  }
+  message SetVpsUserId {
+    string vps_user_id = 1;
+  }
+  message SmartAppId {
+    oneof payload {
+      bytes field1 = 1; // <sub-message> TBD
+      string android_application_id = 2;
+    }
+  }
+  message StarAPISubscribe {
+    repeated int32 field1 = 1; // int32/enum
+    string subscriber_id = 2;
+  }
+  message StarOsBackendSession {
+    string id = 1;
+  }
+  message StartBiometryConfirmationResponse {
+    oneof payload {
+      string code = 1;
+      string error = 2;
+    }
+  }
+  message TargetStarVersion {
+    string version = 1;
+  }
+  message User {
+    string user_id = 1;
+    string access_token = 2;
+    string vps_user_id = 3;
+    EsaAuthState field4 = 4; // ← EsaAuthState
+    BackendAuthState field5 = 5; // ← BackendAuthState
+  }
+  message UserCertificate {
+    string certificate = 1;
+  }
+}
+
+message StarMessage2 {
+  bytes field1 = 1; // <sub-message> TBD
+  string uuid = 2;
+  StarAny field5 = 5; // ← StarAny
+}
+
+message StereoPairMessage {
+  string channel = 1;
+  int32 field2 = 2; // int32/enum
+  string mr_session_id = 5;
+}
+
+message SystemMessage {
+  int32 field1 = 1; // int32/enum
+  string name = 2;
+  string payload = 3;
+  bytes field4 = 4; // <sub-message> TBD
+  string source = 5;
+}
+
+message SystemPush {
+  int32 field1 = 1; // int32/enum
+  string payload = 2;
+}
+
+message TimeLimit {
+  repeated bytes field1 = 1; // <sub-message> TBD
+  repeated string apps = 2;
+}
+
+message TimeZone {
+  string id = 1;
+  int32 field2 = 2; // int32/enum
+}
+
+message TimerNext {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message TvPower {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message UpdateAlarmList {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message UserAgreement {
+  bool field1 = 1;
+  string payload = 2;
+}
+
+message UserListStorage {
+  repeated bytes field1 = 1; // <sub-message> TBD
+  string current_sub = 2;
+  string owner_sub = 3;
+}
+
+message UserSettings {
+  string settings = 1;
+}
+
+message UserTexts {
+  string time_left = 1;
+  string time_exceeded = 2;
+  string time_to_finish = 3;
+  string time_sleep = 4;
+  string block_app = 5;
+  string notify_button = 6;
+}
+
+message Volume {
+  bytes field1 = 1; // <sub-message> TBD
+  string payload = 2;
+}
+
+message WifiConnect {
+  string ssid = 1;
+  string password = 2;
+  int32 field3 = 3; // int32/enum
+  bool field4 = 4;
+}
+
+message WifiInfo {
+  string ssid = 1;
+  string bssid = 2;
+  bool field3 = 3;
+  int32 field4 = 4; // int32/enum
+  int32 field5 = 5; // int32/enum
+  int32 field6 = 6; // int32/enum
+  int32 field7 = 7; // int32/enum
+}
+

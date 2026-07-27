@@ -1,20 +1,22 @@
 """Тесты Options Flow + чтение опций в coordinator."""
 from __future__ import annotations
 
-from tests._fakes import build_coordinator, make_entry, make_state, make_track
-from tests._ha_stubs import HomeAssistant
-
 from sboom_ha.const import (
     DEFAULT_AVAILABILITY_THRESHOLD,
+    DEFAULT_KARAOKE_FILL,
     DEFAULT_KEEPALIVE_INTERVAL,
     DEFAULT_LYRICS_ENABLED,
     DEFAULT_VOLUME_POLL_INTERVAL,
     OPT_AVAILABILITY_THRESHOLD,
+    OPT_KARAOKE_FILL,
     OPT_KEEPALIVE_INTERVAL,
     OPT_LYRICS_ENABLED,
     OPT_VOLUME_POLL_INTERVAL,
 )
 from sboom_ha.coordinator import SboomCoordinator
+
+from tests._fakes import make_entry, make_state, make_track
+from tests._ha_stubs import HomeAssistant
 
 
 def _coord_with_options(**opts):
@@ -61,6 +63,16 @@ def test_lyrics_enabled_override():
     assert coord._lyrics_enabled is False
 
 
+def test_karaoke_fill_defaults_off():
+    """Закраска караоке по умолчанию выключена (статичный текст)."""
+    assert DEFAULT_KARAOKE_FILL is False
+    assert _coord_with_options().karaoke_fill is False
+
+
+def test_karaoke_fill_override():
+    assert _coord_with_options(**{OPT_KARAOKE_FILL: True}).karaoke_fill is True
+
+
 # ─────────────────── lyrics_enabled gating ───────────────────
 
 def test_maybe_fetch_lyrics_no_op_when_disabled():
@@ -71,7 +83,7 @@ def test_maybe_fetch_lyrics_no_op_when_disabled():
     coord.track = make_track(track_id="X")  # валидный трек
     coord._maybe_fetch_lyrics()
     # Если lyrics disabled — track_id НЕ должен попасть в inflight set
-    assert "X" not in coord._lyrics_inflight
+    assert "X" not in coord.lyrics._inflight
 
 
 def test_maybe_fetch_lyrics_runs_when_enabled():
@@ -82,7 +94,7 @@ def test_maybe_fetch_lyrics_runs_when_enabled():
     coord.track = make_track(track_id="Y", title="t", artists=["a"])
     coord._maybe_fetch_lyrics()
     # Background task создан → track_id в inflight
-    assert "Y" in coord._lyrics_inflight
+    assert "Y" in coord.lyrics._inflight
 
 
 # ─────────────────── coexistence with state ───────────────────

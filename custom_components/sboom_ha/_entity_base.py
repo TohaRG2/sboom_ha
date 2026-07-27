@@ -41,7 +41,8 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
             model=entry.data.get(CONF_DEVICE_MODEL) or "SberBoom",
             sw_version=entry.data.get(CONF_DEVICE_FIRMWARE),
             serial_number=entry.data.get(CONF_DEVICE_ID),
-            configuration_url=f"http://{host}",
+            # configuration_url не задаём: веб-интерфейса у колонки нет,
+            # ссылка вела бы на несуществующую страницу.
         )
 
     @property

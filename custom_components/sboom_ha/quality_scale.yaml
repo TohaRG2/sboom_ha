@@ -11,22 +11,16 @@ rules:
   brands: done
   common-modules: done
   config-flow: done
-  config-flow-test-coverage:
-    status: todo
-    comment: Тесты config_flow ещё не покрывают reauth/reconfigure end-to-end.
+  config-flow-test-coverage: done
   dependency-transparency: done
   docs-actions: done
   docs-high-level-description: done
   docs-installation-instructions: done
-  docs-removal-instructions:
-    status: todo
-    comment: Добавить раздел "Удаление" в README.
+  docs-removal-instructions: done
   entity-event-setup: done
   entity-unique-id: done
   has-entity-name: done
-  runtime-data:
-    status: todo
-    comment: Сейчас используем hass.data[DOMAIN][entry_id]; план миграции на entry.runtime_data.
+  runtime-data: done
   test-before-configure: done
   test-before-setup: done
   unique-config-entry: done
@@ -40,7 +34,13 @@ rules:
   integration-owner: done
   log-when-unavailable: done
   parallel-updates: done
-  reauthentication-flow: done
+  reauthentication-flow:
+    status: todo
+    comment: >-
+      Reauth-flow реализован (сервис sboom_ha.reauth), но автоматического
+      триггера нет: локальный протокол не отдаёт различимого признака
+      «токен отвергнут» — недоступность и отзыв токена неотличимы, ложные
+      reauth-баннеры при сетевых сбоях были бы хуже.
   test-coverage: done
 
   # ───── Gold ─────

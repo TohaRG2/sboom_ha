@@ -28,8 +28,13 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "E501",  # длинные строки — line-length 100 уже регулирует
-    "B008",  # function-call-in-default-arg — типичный паттерн в HA
+    "E501",   # длинные строки — line-length 100 уже регулирует
+    "B008",   # function-call-in-default-arg — типичный паттерн в HA
+    # Проект сознательно русскоязычный: кириллица в docstrings/комментариях —
+    # норма, а не "ambiguous character".
+    "RUF001",
+    "RUF002",
+    "RUF003",
 ]
 
 [tool.ruff.lint.per-file-ignores]

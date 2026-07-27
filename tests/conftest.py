@@ -20,7 +20,7 @@ from tests._ha_stubs import install_stubs  # noqa: E402
 install_stubs()
 
 
-import pytest
+import pytest  # noqa: E402  — stubs должны установиться до HA-импортов
 
 
 @pytest.fixture

@@ -1,17 +1,31 @@
 {
   "domain": "sboom_ha",
   "name": "SBoom (LAN)",
-  "codeowners": ["@TohaRG2"],
+  "codeowners": [
+    "@TohaRG2",
+    "@dzerik"
+  ],
   "config_flow": true,
-  "dependencies": ["zeroconf"],
-  "documentation": "https://github.com/TohaRG2/sboom_ha",
+  "dependencies": [
+    "zeroconf",
+    "http",
+    "frontend",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/dzerik/sboom_ha",
   "integration_type": "device",
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/TohaRG2/issues",
-  "quality_scale": "silver",
-  "requirements": ["websockets>=13.0", "Pillow>=10.0"],
-  "version": "0.11.1",
+  "issue_tracker": "https://github.com/dzerik/sboom_ha/issues",
+  "quality_scale": "bronze",
+  "requirements": [
+    "websockets>=13.0",
+    "Pillow>=10.0",
+    "httpx>=0.27"
+  ],
+  "version": "0.35.2",
   "zeroconf": [
-    { "type": "_staros._tcp.local." }
+    {
+      "type": "_staros._tcp.local."
+    }
   ]
 }

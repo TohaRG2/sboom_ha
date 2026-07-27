@@ -1,13 +1,11 @@
 # Custom services для интеграции SBoom.
-# Регистрируются в services.py:async_register_services.
+# Регистрируются в services.py:async_register_services (async_setup).
+# Имена и описания — в translations/{en,ru}.json (ключ "services"),
+# здесь только структура полей и селекторы.
 
 refresh_metadata:
-  name: Refresh metadata
-  description: Force-fetch текущего трека и состояния колонки (без ожидания poll-цикла).
   fields:
     device_id:
-      name: Device
-      description: SberBoom-устройство (по умолчанию — все сконфигурированные).
       required: false
       selector:
         device:
@@ -15,12 +13,8 @@ refresh_metadata:
           multiple: true
 
 reauth:
-  name: Re-authenticate (re-pair)
-  description: Запустить процесс повторной привязки. Нужно нажать "+" на корпусе колонки после вызова сервиса.
   fields:
     device_id:
-      name: Device
-      description: SberBoom-устройство для переавторизации.
       required: false
       selector:
         device:
@@ -28,26 +22,18 @@ reauth:
           multiple: true
 
 bluetooth_device:
-  name: Bluetooth device command
-  description: Подключить, отключить или удалить спаренное Bluetooth-устройство колонки.
   fields:
     device_id:
-      name: Device
-      description: SberBoom-устройство (по умолчанию — все сконфигурированные).
       required: false
       selector:
         device:
           integration: sboom_ha
           multiple: true
     mac_address:
-      name: MAC address
-      description: MAC-адрес BT-устройства (см. атрибут devices сенсора «Спаренные Bluetooth-устройства»).
       required: true
       selector:
         text:
     command:
-      name: Command
-      description: Действие над устройством.
       required: true
       selector:
         select:
@@ -55,3 +41,38 @@ bluetooth_device:
             - connect
             - disconnect
             - remove
+
+play_music:
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: sboom_ha
+          multiple: true
+    url:
+      required: false
+      example: "https://zvuk.com/track/84279897"
+      selector:
+        text:
+    query:
+      required: false
+      example: "Егор Летов"
+      selector:
+        text:
+    id:
+      required: false
+      example: "84279897"
+      selector:
+        text:
+    kind:
+      required: false
+      selector:
+        select:
+          options:
+            - track
+            - artist
+            - release
+            - playlist
+            - podcast
+            - abook

@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import pytest
+from sboom_ha.const import DOMAIN
+from sboom_ha.system_health import system_health_info
 
 from tests._fakes import build_coordinator, make_state, make_track
 from tests._ha_stubs import HomeAssistant
-
-from sboom_ha.const import DOMAIN
-from sboom_ha.system_health import system_health_info
 
 
 @pytest.mark.asyncio

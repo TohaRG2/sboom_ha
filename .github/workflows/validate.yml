@@ -7,6 +7,15 @@ on:
   pull_request:
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch:
+
+# Минимальные права: workflow только читает содержимое репозитория.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate-hacs:
@@ -14,8 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6
 
+      # hacs/action официально документирован для использования только с @main
+      # (релизных тегов у action нет): https://github.com/hacs/action
       - name: HACS Action
         uses: hacs/action@main
         with:
@@ -26,7 +37,60 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6
 
+      # home-assistant/actions документирован для использования с @master
+      # (теги не публикуются): https://github.com/home-assistant/actions
       - name: Hassfest
         uses: home-assistant/actions/hassfest@master
+
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install ruff
+        run: pip install ruff
+
+      # Только ruff check (strict). `ruff format --check` сознательно не
+      # включён: проект использует ручное выравнивание (const, спеки),
+      # массовое переформатирование уничтожило бы стиль и git blame.
+      - name: Ruff check
+        run: ruff check custom_components/ tests/

@@ -13,10 +13,8 @@ from tests._ha_stubs import install_stubs
 install_stubs()
 
 from homeassistant.exceptions import HomeAssistantError  # noqa: E402
-
 from sboom_ha._entity_base import SboomEntity  # noqa: E402
 from sboom_ha.api import SberSpeakerClient  # noqa: E402
-
 
 # ─────────────────────── герметичность stub'ов ───────────────────────
 

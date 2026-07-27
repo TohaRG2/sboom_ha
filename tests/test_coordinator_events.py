@@ -1,17 +1,16 @@
 """Тесты event bus в SboomCoordinator: track/playback/volume changes."""
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-
-from tests._fakes import build_coordinator, make_state, make_track
-
+from sboom_ha.const import OP_GET_STATE
 from sboom_ha.coordinator import (
+    EVENT_CONNECTION_CHANGED,
     EVENT_PLAYBACK_CHANGED,
     EVENT_TRACK_CHANGED,
     EVENT_VOLUME_CHANGED,
 )
+
+from tests._fakes import build_coordinator, make_state, make_track
 
 
 def _fire(coord, event_type: str, count: int = 1):
@@ -180,3 +179,68 @@ async def test_handle_event_idempotent_when_same_track():
     coord.hass.bus.fired.clear()
     await coord._handle_event(raw, parsed)  # second push: still A → no fire
     assert all(et != EVENT_TRACK_CHANGED for et, _ in coord.hass.bus.fired)
+
+
+@pytest.mark.asyncio
+async def test_handle_event_unparseable_state_push_keeps_state():
+    """Регрессия: state-push с нераспознанным payload не должен затирать self.state."""
+    old = make_state(volume=42, muted=False)
+    coord = build_coordinator(track=make_track(), state=old)
+    coord.hass.bus.fired.clear()
+    # Маркер state-update стоит, но payload — мусор: parse_state вернёт None.
+    parsed = {5: {OP_GET_STATE: True}}
+    await coord._handle_event(b"\x00\x00garbage, no json here\x00", parsed)
+    assert coord.state is old, "битый push не должен трогать последний известный state"
+    # changed=False → никакие события/данные не публикуются
+    assert coord.hass.bus.fired == []
+
+
+@pytest.mark.asyncio
+async def test_handle_event_metadata_push_stamps_received_times():
+    """Push metadata обновляет track и ставит штампы времени получения.
+
+    Без received_monotonic ломается экстраполяция позиции (helpers),
+    без received_ts — media_position_updated_at."""
+    coord = build_coordinator(track=None, state=make_state())
+    raw, parsed = _push_track_payload("321", title="Stamped")
+    await coord._handle_event(raw, parsed)
+    assert coord.track is not None
+    assert coord.track.track_id == "321"
+    assert coord.track.received_monotonic is not None
+    assert coord.track.received_ts is not None
+
+
+# ─────────────────────── _set_connected при unload ───────────────────────
+
+def test_set_connected_suppressed_while_stopping():
+    """Регрессия: штатный unload (stopping) стрелял connection_changed и будил listeners."""
+    coord = build_coordinator(track=make_track(), state=make_state())
+    coord.connected = True
+    coord._stopping = True
+    coord.hass.bus.fired.clear()
+    listeners_before = getattr(coord, "_listener_calls", 0)
+
+    coord._set_connected(False)
+
+    assert coord.connected is False  # флаг всё же обновлён
+    assert all(et != EVENT_CONNECTION_CHANGED for et, _ in coord.hass.bus.fired), (
+        "при _stopping=True событие в bus идти не должно"
+    )
+    assert getattr(coord, "_listener_calls", 0) == listeners_before, (
+        "при _stopping=True async_update_listeners не должен вызываться"
+    )
+
+
+def test_set_connected_fires_event_when_not_stopping():
+    """Контраст: при рабочем состоянии переход connected→False публикуется."""
+    coord = build_coordinator(track=make_track(), state=make_state())
+    coord.connected = True
+    coord._stopping = False
+    coord.hass.bus.fired.clear()
+    listeners_before = getattr(coord, "_listener_calls", 0)
+
+    coord._set_connected(False)
+
+    [payload] = _fire(coord, EVENT_CONNECTION_CHANGED)
+    assert payload["connected"] is False
+    assert getattr(coord, "_listener_calls", 0) == listeners_before + 1

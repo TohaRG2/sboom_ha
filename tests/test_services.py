@@ -4,10 +4,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from tests._fakes import build_coordinator, make_state, make_track
-from tests._ha_stubs import HomeAssistant, ServiceCall
-
 from sboom_ha.const import DOMAIN
 from sboom_ha.services import (
     SERVICE_REAUTH,
@@ -15,11 +11,13 @@ from sboom_ha.services import (
     async_register_services,
 )
 
+from tests._fakes import build_coordinator, make_state, make_track
+from tests._ha_stubs import HomeAssistant, ServiceCall
+
 
 def _setup_hass_with_coord(coord) -> HomeAssistant:
-    hass = coord.hass
-    hass.data.setdefault(DOMAIN, {})[coord.entry.entry_id] = coord
-    return hass
+    # build_coordinator уже прописал entry.runtime_data и config_entries.
+    return coord.hass
 
 
 # ─────────────────── registration ───────────────────
@@ -50,15 +48,30 @@ async def test_refresh_metadata_calls_request_refresh_on_all_when_no_target():
 
 
 @pytest.mark.asyncio
-async def test_refresh_metadata_swallows_per_coordinator_errors():
+async def test_refresh_metadata_propagates_errors_to_caller():
+    """Новый контракт: ошибка команды видна пользователю, а не глотается молча."""
     coord = build_coordinator(track=make_track(), state=make_state())
     coord.async_request_refresh = AsyncMock(side_effect=RuntimeError("WS dead"))
     hass = _setup_hass_with_coord(coord)
     async_register_services(hass)
 
     handler = hass.services._registered[(DOMAIN, SERVICE_REFRESH_METADATA)]
-    # Не должно бросить
-    await handler(ServiceCall(data={}))
+    with pytest.raises(RuntimeError):
+        await handler(ServiceCall(data={}))
+
+
+@pytest.mark.asyncio
+async def test_service_call_without_loaded_entries_raises_validation_error():
+    """Без загруженных entries сервис падает с ServiceValidationError
+    (IQS action-setup), а не молча делает ничего."""
+    from tests._ha_stubs import ServiceValidationError
+
+    hass = HomeAssistant()
+    async_register_services(hass)
+
+    handler = hass.services._registered[(DOMAIN, SERVICE_REFRESH_METADATA)]
+    with pytest.raises(ServiceValidationError):
+        await handler(ServiceCall(data={}))
 
 
 # ─────────────────── reauth ───────────────────

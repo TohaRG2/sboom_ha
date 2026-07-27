@@ -1,12 +1,11 @@
 """Тесты SboomMediaPlayer entity-properties через stubs HA + Fake coordinator."""
 from __future__ import annotations
 
-# Пользуемся builders из _fakes — они уже подняли HA stubs.
-from tests._fakes import build_coordinator, make_entry, make_state, make_track
-
 from homeassistant.components.media_player import MediaPlayerState, MediaType, RepeatMode
 from sboom_ha.media_player import SboomMediaPlayer
 
+# Пользуемся builders из _fakes — они уже подняли HA stubs.
+from tests._fakes import build_coordinator, make_entry, make_state, make_track
 
 # ─────────────────────── state derivation ───────────────────────
 
@@ -178,3 +177,98 @@ def test_unique_id_falls_back_to_host_when_no_device_id():
     coord = build_coordinator(entry=entry, track=make_track(), state=make_state())
     mp = SboomMediaPlayer(coord, entry)
     assert mp._attr_unique_id == "sboom_ha_10.0.0.5"
+
+
+# ─────────────────────── volume commands: optimistic-аккумуляция ─────────
+
+
+def _mock_set_volume(coord) -> list[int]:
+    """Мокает client.set_volume, возвращает список отправленных значений."""
+    sent: list[int] = []
+
+    async def set_volume(percent: int) -> None:
+        sent.append(percent)
+
+    coord.client.set_volume = set_volume
+    return sent
+
+
+async def test_volume_up_accumulates_across_repeated_presses():
+    """Регрессия (HIGH): без optimistic-патча три volume_up подряд читали
+    устаревшую громкость из state и слали 55, 55, 55 вместо 55, 60, 65."""
+    coord = build_coordinator(track=make_track(), state=make_state(volume=50))
+    mp = SboomMediaPlayer(coord, coord.entry)
+    sent = _mock_set_volume(coord)
+
+    await mp.async_volume_up()
+    await mp.async_volume_up()
+    await mp.async_volume_up()
+
+    assert sent == [55, 60, 65]
+    assert coord.state.volume_percent == 65
+
+
+async def test_volume_down_accumulates_symmetrically():
+    coord = build_coordinator(track=make_track(), state=make_state(volume=50))
+    mp = SboomMediaPlayer(coord, coord.entry)
+    sent = _mock_set_volume(coord)
+
+    await mp.async_volume_down()
+    await mp.async_volume_down()
+
+    assert sent == [45, 40]
+    assert coord.state.volume_percent == 40
+
+
+async def test_mute_patches_coordinator_state_optimistically():
+    """mute не приходит push'ем — после команды state.muted патчится сразу."""
+    coord = build_coordinator(track=make_track(), state=make_state(muted=False))
+    mp = SboomMediaPlayer(coord, coord.entry)
+    calls: list[str] = []
+
+    async def media_mute() -> None:
+        calls.append("mute")
+
+    async def media_unmute() -> None:
+        calls.append("unmute")
+
+    coord.client.media_mute = media_mute
+    coord.client.media_unmute = media_unmute
+
+    await mp.async_mute_volume(True)
+    assert coord.state.muted is True
+    assert mp.is_volume_muted is True
+
+    await mp.async_mute_volume(False)
+    assert coord.state.muted is False
+    assert calls == ["mute", "unmute"]
+
+
+def test_media_player_rich_attributes_from_fixture():
+    """extra_state_attributes выставляет контекст трека (плейлист/тип/источник)."""
+    from pathlib import Path
+
+    from sboom_ha.api import SberSpeakerClient
+
+    from tests._fakes import build_coordinator, make_state
+
+    raw = (Path(__file__).parent / "fixtures" / "track_metadata.json").read_bytes()
+    track = SberSpeakerClient.parse_track(raw)
+    coord = build_coordinator(track=track, state=make_state())
+    from sboom_ha.media_player import SboomMediaPlayer
+    mp = SboomMediaPlayer(coord, coord.entry)
+    attrs = mp.extra_state_attributes
+    assert attrs["playlist"] == "Персональная волна"
+    assert attrs["playlist_type"] == "endless"
+    assert attrs["media_source"] == "MUSIC"
+    assert attrs["provider"] == "zvuk"
+    assert attrs["buffering"] is False
+
+
+def test_media_player_no_attributes_without_track():
+    from sboom_ha.media_player import SboomMediaPlayer
+
+    from tests._fakes import build_coordinator, make_state
+    coord = build_coordinator(track=None, state=make_state())
+    mp = SboomMediaPlayer(coord, coord.entry)
+    assert mp.extra_state_attributes is None

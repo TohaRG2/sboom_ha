@@ -13,7 +13,6 @@ from __future__ import annotations
 from sboom_ha._tlv import field
 from sboom_ha.api import SberSpeakerClient
 
-
 # ─────────────────────── parse_track ───────────────────────
 
 def test_parse_track_push_format(real_track_money_raw):
@@ -91,6 +90,47 @@ def test_parse_track_playback_speed_none_when_absent():
     assert track.playback_speed is None
 
 
+def test_parse_track_trackid_in_middle_of_large_payload():
+    """Реальный кейс: trackId глубоко в большом payload — бинарный префикс,
+    посторонний закрытый JSON-объект до трека и мусорный хвост после."""
+    raw = (
+        b"\x00\x04\xba\x01 binary prefix "
+        b'{"volume":{"muted":false,"percent":10}} '
+        b'{"trackId":"55","title":"Mid Track",'
+        b'"artists":[{"id":"7","name":"Artist Mid"}],'
+        b'"playing":true,"provider":"zvuk"}'
+        b"\xff\xfe trailing garbage"
+    )
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "55"
+    assert track.title == "Mid Track"
+    assert track.artists == ["Artist Mid"]
+    assert track.playing is True
+
+
+def test_parse_track_state_format_status_from_player_wrapper():
+    """State-формат: position/shuffle/timestamp берутся из окружающего player{},
+    а не из info{} с треком (info попадает в backward-скан по trackId)."""
+    raw = (
+        b"\x00\x02prefix"
+        b'{"info":{"player":{'
+        b'"playing":true,"position":42,"shuffle":true,'
+        b'"stateChangedTimestamp":1700000001234,'
+        b'"info":{"trackId":"777","title":"Deep Track",'
+        b'"artists":[{"id":"3","name":"Deep Artist"}],"duration":200}}}}'
+    )
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "777"
+    assert track.playing is True
+    assert track.shuffle is True
+    assert track.position_sec == 42
+    # timestamp позиции нет в state-формате — берётся stateChangedTimestamp
+    assert track.position_ts_ms == 1700000001234
+    assert track.duration_sec == 200
+
+
 # ─────────────────────── parse_queue ───────────────────────
 
 
@@ -150,11 +190,22 @@ def test_parse_state_handles_muted_true():
     assert state.volume_percent == 0
 
 
-def test_parse_state_returns_defaults_when_no_volume_info():
-    """Если в payload нет volume-блока — state с default-значениями (None), не падение."""
-    state = SberSpeakerClient.parse_state(b"no volume here")
-    # По дефолту volume_percent и muted могут быть None или default int — главное чтобы не падало
+def test_parse_state_returns_none_on_unparseable_payload():
+    """Полностью нераспознанный payload → None, а НЕ state с нулями.
+
+    Регрессия из ревью: раньше возвращался SpeakerState(volume=0, muted=False),
+    и один битый push обнулял громкость и все device-сенсоры в UI.
+    """
+    assert SberSpeakerClient.parse_state(b"no volume here") is None
+
+
+def test_parse_state_json_without_volume_keeps_fields_unknown():
+    """JSON распознан, но volume-блока нет → volume/muted остаются None
+    (coordinator домерджит их из прежнего state), а не обнуляются."""
+    state = SberSpeakerClient.parse_state(b'{"alarm":{"alarmsCounter":0}}')
     assert state is not None
+    assert state.volume_percent is None
+    assert state.muted is None
 
 
 def test_parse_state_keeps_raw_json_chunk():
@@ -212,3 +263,44 @@ def test_parse_scanned_bt_with_devices():
     assert devices[0].mac == "11:22:33:44:55:66"
     assert devices[0].name == "Speaker"
     assert devices[0].rssi == 200
+
+
+def test_parse_track_extracts_has_lyrics():
+    """info.hasLyrics → track.has_lyrics (схема из реального metadata-захвата)."""
+    raw = b'{"trackId":"42","title":"X","artists":[],"hasLyrics":true}'
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None and track.has_lyrics is True
+
+    raw2 = b'{"trackId":"42","title":"X","artists":[],"hasLyrics":false}'
+    assert SberSpeakerClient.parse_track(raw2).has_lyrics is False
+
+
+def test_parse_track_has_lyrics_none_when_absent():
+    """Нет hasLyrics — поле остаётся None (не False): 'неизвестно' ≠ 'нет текста'."""
+    raw = b'{"trackId":"42","title":"X","artists":[]}'
+    assert SberSpeakerClient.parse_track(raw).has_lyrics is None
+
+
+def test_parse_track_rich_now_playing_fields():
+    """Богатый Now Playing из реального live-захвата (tests/fixtures/track_metadata.json):
+    playlist/type/id/source/childMode/playingPending парсятся."""
+    from pathlib import Path
+    raw = (Path(__file__).parent / "fixtures" / "track_metadata.json").read_bytes()
+    t = SberSpeakerClient.parse_track(raw)
+    assert t is not None
+    assert t.playlist_title == "Персональная волна"
+    assert t.playlist_type == "endless"
+    assert t.playlist_id == "9999"
+    assert t.media_source == "MUSIC"
+    assert t.playlist_liked is False
+    assert t.child_mode is False
+    assert t.buffering is False
+
+
+def test_parse_track_rich_fields_none_when_absent():
+    """Минимальный payload — новые поля None (не False), «неизвестно» ≠ «выключено»."""
+    t = SberSpeakerClient.parse_track(b'{"trackId":"1","title":"X","artists":[]}')
+    assert t.playlist_type is None
+    assert t.media_source is None
+    assert t.child_mode is None
+    assert t.buffering is None

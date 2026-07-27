@@ -5,7 +5,6 @@ import struct
 
 from sboom_ha._tlv import decode, decode_repeated, field, varint
 
-
 # ─────────────────────── varint ───────────────────────
 
 def test_varint_zero():
@@ -109,6 +108,44 @@ def test_decode_real_envelope_fragment():
     # Эмуляция "конверта": id=req-id (str), type=2 (varint)
     pkt = field(1, 0, 2) + field(2, 2, b"req-123")
     assert decode(pkt) == {1: 2, 2: "req-123"}
+
+
+# ─────────────────────── decode: fixed32 (wire-type 5) ───────────────────────
+
+def test_decode_fixed32_float():
+    # roundtrip: field(kind=5) кодирует float32 LE — decode должен его прочитать
+    enc = field(1, 5, 1.5)
+    assert decode(enc) == {1: 1.5}
+
+
+def test_decode_fixed32_does_not_stop_parsing():
+    """Регрессия: раньше decode() молча обрывал разбор на wire-type 5,
+    теряя все последующие поля."""
+    enc = field(1, 5, 1.0) + field(2, 0, 7) + field(3, 2, b"ok")
+    assert decode(enc) == {1: 1.0, 2: 7, 3: "ok"}
+
+
+def test_decode_nested_fixed32_playback_speed():
+    """Реальный кейс протокола: op=23 SET_PLAYBACK_SPEED — float32 в fixed32
+    внутри вложенного сообщения (envelope 5 → op 23 → поле 1)."""
+    pkt = field(5, 2, field(23, 2, field(1, 5, 1.5)))
+    assert decode(pkt) == {5: {23: {1: 1.5}}}
+
+
+def test_decode_truncated_fixed32_returns_partial():
+    # fixed32 обрезан (2 байта из 4) — возвращаем уже распарсенное, без падения
+    truncated = field(2, 0, 5) + b"\x0d\x00\x00"
+    assert decode(truncated) == {2: 5}
+
+
+# ─────────────────────── decode: multi-nested ───────────────────────
+
+def test_decode_multi_level_nested():
+    """Двухуровневая вложенность + сосед-строка — рекурсия после рефакторинга."""
+    inner2 = field(1, 0, 3)
+    inner1 = field(2, 2, inner2) + field(3, 0, 9)
+    pkt = field(5, 2, inner1) + field(6, 2, b"tail")
+    assert decode(pkt) == {5: {2: {1: 3}, 3: 9}, 6: "tail"}
 
 
 # ─────────────────────── decode_repeated ───────────────────────

@@ -14,7 +14,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
 
-from .const import DOMAIN
 from .coordinator import SboomCoordinator
 
 # Поля entry.data + state, которые надо вырезать перед публикацией:
@@ -26,6 +25,7 @@ TO_REDACT = {
     "client_id",
     "device_id",
     "host",
+    "client_host",  # coordinator snapshot — тот же PII, что и host
     "serial",
     "serial_number",
 }
@@ -48,8 +48,8 @@ def _coordinator_snapshot(coord: SboomCoordinator) -> dict[str, Any]:
             coord.update_interval.total_seconds() if coord.update_interval else None
         ),
         "stopping": coord._stopping,
-        "lyrics_cache_size": len(coord.lyrics_by_track),
-        "lyrics_inflight_count": len(coord._lyrics_inflight),
+        "lyrics_cache_size": len(coord.lyrics.by_track),
+        "lyrics_inflight_count": coord.lyrics.inflight_count,
         "client_host": coord.client.host,
         "client_port": coord.client.port,
     }
@@ -58,7 +58,7 @@ def _coordinator_snapshot(coord: SboomCoordinator) -> dict[str, Any]:
 def _build_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
-    coord: SboomCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coord: SboomCoordinator | None = getattr(entry, "runtime_data", None)
 
     payload: dict[str, Any] = {
         "entry": {
@@ -68,7 +68,9 @@ def _build_diagnostics(
             "options": async_redact_data(dict(entry.options), TO_REDACT),
             "title": entry.title,
         },
-        "coordinator": _coordinator_snapshot(coord) if coord else None,
+        "coordinator": (
+            async_redact_data(_coordinator_snapshot(coord), TO_REDACT) if coord else None
+        ),
         "track": async_redact_data(_safe_dataclass(coord.track), TO_REDACT) if coord else None,
         "state": (
             async_redact_data(_safe_dataclass(coord.state), TO_REDACT) if coord else None

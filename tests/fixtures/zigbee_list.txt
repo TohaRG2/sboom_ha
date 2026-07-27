@@ -1,0 +1,5 @@
+| # |   IEEE Address   |  NWK |          XID         |       State      | Manufacturer name |     Model ID     | Pwr src | OTA perm. | App | Has OTA | RSSI |
+|---|------------------|------|----------------------|------------------|-------------------|------------------|---------|-----------|-----|---------|------|
+| 1 | A4C1384D8FBABD5D | 8E0F | e8nh203ns3kulgtt5mhg |   Interview Done | _TZ3000_5gey1ohx  | TS0002           | M1Phase | forbidden |  70 |     yes |  -58 |
+| 2 | F84477FFFE2CA202 | 923D | e8nh204ghmvqt6i7r6i0 |   Interview Done | _TZ3290_ot6ewjvmejq5ekhl | TS1201           | Battery | forbidden |  67 |      no |  -66 |
+| 3 | A4C1383600D89F0A | CAE1 | e8nh2032aq9okng4jhn0 |   Interview Done | _TZ3000_402vrq2i  | TS004F           | Battery | forbidden |  66 |     yes |  -46 |

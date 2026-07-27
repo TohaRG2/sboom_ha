@@ -2,16 +2,15 @@
 from __future__ import annotations
 
 import pytest
-
-from tests._fakes import build_coordinator, make_state, make_track
-from tests._ha_stubs import HomeAssistant
-
 from sboom_ha.const import DOMAIN
 from sboom_ha.diagnostics import (
     TO_REDACT,
     async_get_config_entry_diagnostics,
     async_get_device_diagnostics,
 )
+
+from tests._fakes import build_coordinator, make_state, make_track
+from tests._ha_stubs import HomeAssistant
 
 
 def _setup_hass_with_coord(coord) -> HomeAssistant:
@@ -112,6 +111,7 @@ async def test_diagnostics_when_no_track_or_state():
 async def test_diagnostics_when_coordinator_not_in_hass_data():
     """Граничный кейс: hass.data пуст (entry не setup'ed)."""
     from sboom_ha.diagnostics import async_get_config_entry_diagnostics
+
     from tests._fakes import make_entry
 
     hass = HomeAssistant()

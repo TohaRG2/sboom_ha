@@ -9,13 +9,11 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+import time
+from datetime import UTC, datetime
 
-import pytest
-
+from sboom_ha.api import TrackInfo
 from sboom_ha.helpers import _MAX_EXTRAPOLATION_SEC, cover_url, track_position
-
 
 # ─────────────────────────── cover_url ───────────────────────────
 
@@ -36,7 +34,9 @@ def _make_track(**kwargs):
         "repeat": "none",
     }
     defaults.update(kwargs)
-    return SimpleNamespace(**defaults)
+    # Реальный TrackInfo, а не SimpleNamespace: тест ловит переименования
+    # и добавления полей модели (received_monotonic и т.п.).
+    return TrackInfo(**defaults)
 
 
 def test_cover_url_returns_release_url_when_release_id_present():
@@ -79,7 +79,7 @@ class _Coord:
 
 
 def _now_ms() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1000)
+    return int(datetime.now(UTC).timestamp() * 1000)
 
 
 def test_track_position_none_when_no_track():
@@ -146,3 +146,45 @@ def test_track_position_handles_no_duration():
     )
     pos = track_position(_Coord(track))
     assert 51.5 <= pos <= 52.5
+
+
+# ────────────────── экстраполяция от received_monotonic ──────────────────
+# Регрессия из ревью: завязка на часы колонки (position_ts_ms) сдвигала
+# позицию на величину clock skew, а при часах колонки «в будущем» вовсе
+# отключала экстраполяцию. База — момент получения данных на стороне HA.
+
+def test_track_position_uses_received_monotonic_over_device_clock():
+    """Часы колонки на 30 сек в будущем — раньше это замораживало позицию.
+    С received_monotonic позиция растёт от момента получения push'а."""
+    track = _make_track(
+        playing=True,
+        position_sec=100,
+        duration_sec=300,
+        position_ts_ms=_now_ms() + 30_000,       # skew: колонка «в будущем»
+        received_monotonic=time.monotonic() - 5,  # push пришёл 5 сек назад
+    )
+    pos = track_position(_Coord(track))
+    assert 104.5 <= pos <= 106.5, f"Ожидалось ~105 (100 + 5 сек по HA-часам), получено {pos}"
+
+
+def test_track_position_scales_with_playback_speed():
+    """При скорости 2.0 позиция растёт вдвое быстрее wall-clock."""
+    track = _make_track(
+        playing=True,
+        position_sec=100,
+        duration_sec=300,
+        playback_speed=2.0,
+        received_monotonic=time.monotonic() - 5,
+    )
+    pos = track_position(_Coord(track))
+    assert 109 <= pos <= 112, f"Ожидалось ~110 (100 + 5 сек × 2.0), получено {pos}"
+
+
+def test_track_position_paused_ignores_received_monotonic():
+    """На паузе позиция не растёт и от HA-часов."""
+    track = _make_track(
+        playing=False,
+        position_sec=42,
+        received_monotonic=time.monotonic() - 60,
+    )
+    assert track_position(_Coord(track)) == 42

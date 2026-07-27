@@ -1,0 +1,820 @@
+// Enum'ы протокола StarOS (значения из клиента).
+// ВНИМАНИЕ: значения перечислены в АЛФАВИТНОМ порядке (порядок бинарного
+// поиска protobuf по имени). Номера ниже — ПОРЯДКОВЫЕ плейсхолдеры,
+// реальные wire-номера enum TBD (в lite-сборке номер!=позиция).
+syntax = "proto3";
+package ru.sber.staros.protobuf;
+
+enum CommandType {  // 50 значений
+  UNKNOWN_DIRECTIVE = 0;
+  BACK = 1;
+  BLUETOOTH_DISCONNECT = 2;
+  BLUETOOTH_START_DISCOVERY = 3;
+  BUG_REPORT = 4;
+  CALL_URL = 5;
+  CLOSE_APP = 6;
+  DEEPLINK = 7;
+  DEVICE_NIGHT_MODE = 8;
+  DEVICE_SLEEP = 9;
+  DEVICE_WAKE_UP = 10;
+  GET_CURRENT_WEATHER = 11;
+  GO_HOME = 12;
+  NAVIGATION_COMMAND = 13;
+  PAUSE_TIMER = 14;
+  PAY_DIALOG = 15;
+  PLAYER_CONTINUE = 16;
+  PLAYER_LOOP = 17;
+  PLAYER_NEXT = 18;
+  PLAYER_PREV = 19;
+  PLAYER_REWIND = 20;
+  PLAYER_SHUFFLE = 21;
+  PLAYER_START = 22;
+  PLAYER_STOP = 23;
+  PLAYER_TO_START = 24;
+  REBOOT = 25;
+  REMOVE_ALARM_CLOCK = 26;
+  REMOVE_TIMER = 27;
+  RESTART_STAROS = 28;
+  RESUME_TIMER = 29;
+  SET_ALARM_CLOCK = 30;
+  SET_DEVICE_VOLUME = 31;
+  SET_ENVIRONMENT = 32;
+  SET_SNOOZE_ALARM_CLOCK = 33;
+  SET_TIMER = 34;
+  SHOW_OKKO = 35;
+  SHOW_TV = 36;
+  SHOW_TV_CHANNEL = 37;
+  SHOW_TV_SEARCH = 38;
+  SHOW_YOUTUBE = 39;
+  SMART_APP_ACTION = 40;
+  SMART_APP_DATA = 41;
+  SMART_APP_ERROR = 42;
+  START_VIDEO_GESTURE_RECORDING = 43;
+  STOP_PLAYERS = 44;
+  STOP_VIDEO_GESTURE_RECORDING = 45;
+  SUGGEST_ESA_AUTH = 46;
+  TIMER_NEXT = 47;
+  VOLUME_DOWN = 48;
+  VOLUME_UP = 49;
+}
+
+enum SetupStep {  // 29 значений
+  UNDEFINED_SCREEN = 0;
+  APPLICATION = 1;
+  ASSISTANT = 2;
+  CAST_PIN_AUTH = 3;
+  CHANNEL_SETTINGS = 4;
+  CHECK_UPDATE = 5;
+  ERROR = 6;
+  ESA_AUTH = 7;
+  ETHERNET = 8;
+  FACE = 9;
+  GAMES = 10;
+  HOME = 11;
+  INPUT = 12;
+  IR_SETUP = 13;
+  KEYBOARD = 14;
+  LAUNCHER = 15;
+  NETWORK = 16;
+  ONBOARDING = 17;
+  PARENTAL_PIN = 18;
+  QR_SETUP = 19;
+  SCREEN_SAVER = 20;
+  SEARCH = 21;
+  SETTINGS = 22;
+  SET_POSITION_DEVICE = 23;
+  SWITCH_JWT_TO_ESA = 24;
+  UPDATE = 25;
+  UPDATE_PREVIEW = 26;
+  WELCOME_SETUP = 27;
+  WIFI = 28;
+}
+
+enum SetupStep_1 {  // 22 значений
+  UNDEFINED_STEP = 0;
+  AUTH = 1;
+  CHANNEL_SETTINGS = 2;
+  CHECK_UPDATE = 3;
+  ESA_AUTH = 4;
+  FACE = 5;
+  GET_READY_FOR_SETUP = 6;
+  INPUT = 7;
+  INTRO = 8;
+  IR_SETUP = 9;
+  KEYBOARD = 10;
+  NETWORK = 11;
+  ONBOARDING = 12;
+  PARENTAL_PIN = 13;
+  QR_SETUP = 14;
+  READY_FOR_SETUP = 15;
+  SET_POSITION_DEVICE = 16;
+  SUGGEST_ESA_AUTH = 17;
+  TIMEZONE = 18;
+  UPDATE = 19;
+  UPDATE_UNAVAILABLE = 20;
+  WELCOME = 21;
+}
+
+enum SetupStep_2 {  // 21 значений
+  UNDEFINED_STEP = 0;
+  AUTH = 1;
+  CHANNEL_SETTINGS = 2;
+  CHECK_UPDATE = 3;
+  ESA_AUTH = 4;
+  FACE = 5;
+  GET_READY_FOR_SETUP = 6;
+  INPUT = 7;
+  INTRO = 8;
+  IR_SETUP = 9;
+  KEYBOARD = 10;
+  NETWORK = 11;
+  ONBOARDING = 12;
+  PARENTAL_PIN = 13;
+  QR_SETUP = 14;
+  READY_FOR_SETUP = 15;
+  SET_POSITION_DEVICE = 16;
+  SUGGEST_ESA_AUTH = 17;
+  TIMEZONE = 18;
+  UPDATE = 19;
+  WELCOME = 20;
+}
+
+enum ServerActionType {  // 14 значений
+  ADD_USER = 0;
+  BUG_REPORT = 1;
+  CONFIG_UPDATE = 2;
+  LINK_PARTNER_SERVICE = 3;
+  LOGOUT = 4;
+  REBOOT_DEVICE = 5;
+  SET_MUTE = 6;
+  SET_SCREEN = 7;
+  SET_VOLUME = 8;
+  UNLINK_DEVICE = 9;
+  UNLINK_DEVICE_BSID = 10;
+  UNLINK_PARTNER_SERVICE = 11;
+  USER_CONFIG_UPDATE = 12;
+  USER_DEVICE_LIST_UPDATED = 13;
+}
+
+enum Flag {  // 12 значений
+  UNDEFINED_FLAG = 0;
+  CAN_OPEN_APPS = 1;
+  HAS_BLUETOOTH = 2;
+  HAS_SERVER_DEFINED_CEC = 3;
+  HAS_SMOTRESHKA = 4;
+  HAS_USER_CONTROLLED_CEC = 5;
+  HAS_YOUTUBE = 6;
+  HOME_SECURITY_FEATURE_ENABLED = 7;
+  IS_EDU_MODE = 8;
+  MUSIC_BLE_DEEPLINK_FEATURE_ENABLED = 9;
+  MUSIC_ENABLE_FLAC = 10;
+  MUSIC_SHOW_VISUALIZER = 11;
+}
+
+enum Enum_BUSY {  // 10 значений
+  NONE = 0;
+  BUSY = 1;
+  CANCEL = 2;
+  ESA_AUTH_ERROR = 3;
+  INVALID_MESSAGE = 4;
+  INVALID_STEP = 5;
+  NOT_IMPLEMENTED = 6;
+  PROCESSING = 7;
+  WAITING = 8;
+  WIFI_CONNECT_ERROR = 9;
+}
+
+enum CapabilityCommandType {  // 9 значений
+  CAP_TV_OFF = 0;
+  CAP_TV_ON = 1;
+  CAP_TV_POWER_TOGGLE = 2;
+  CAP_UNDEFINED_COMMAND = 3;
+  CAP_VOLUME_DOWN = 4;
+  CAP_VOLUME_MUTE = 5;
+  CAP_VOLUME_MUTE_TOGGLE = 6;
+  CAP_VOLUME_UNMUTE = 7;
+  CAP_VOLUME_UP = 8;
+}
+
+enum CommandSource {  // 9 значений
+  UNKNOWN_COMMAND_SOURCE = 0;
+  ACTION_SCREEN_RECEIVER = 1;
+  ALARM = 2;
+  DEVICE_SLEEP_SOURCE = 3;
+  SBER_CAST = 4;
+  SERVER_ACTION = 5;
+  SYSTEM_MESSAGE = 6;
+  TEXT = 7;
+  VOICE = 8;
+}
+
+enum AssistantError {  // 9 значений
+  UNDEFINED_ERROR = 0;
+  ASR_TIMEOUT = 1;
+  ASSISTANT_NOT_AVAILABLE = 2;
+  NO_CONNECTION = 3;
+  NO_INTERNET = 4;
+  RECORDING_INTERRUPTED = 5;
+  TOO_MANY_REQUESTS = 6;
+  USER_COMMUNICATE_WITH_UNREGISTERED_DEVICE = 7;
+  WEAK_INTERNET = 8;
+}
+
+enum AppInstallStatus {  // 9 значений
+  UNDEFINED_STATUS = 0;
+  FAILED_TO_INSTALL = 1;
+  FAILED_TO_UNINSTALL = 2;
+  INSTALLED = 3;
+  NEED_TO_BE_UNINSTALLED = 4;
+  NOT_INSTALLED = 5;
+  ROTATED = 6;
+  UNINSTALLED = 7;
+  WAITING_FOR_USER_DEMAND = 8;
+}
+
+enum AuthState {  // 9 значений
+  UNDEFINED_STATE = 0;
+  REGISTERED = 1;
+  REGISTRATION_FAILED = 2;
+  REGISTRATION_IN_PROGRESS = 3;
+  REGISTRATION_REQUESTED = 4;
+  TOKEN_EXPIRED = 5;
+  TOKEN_EXPIRING = 6;
+  TOKEN_REFRESHED = 7;
+  TOKEN_REFRESH_REQUESTED = 8;
+}
+
+enum Enum_DISABLE {  // 9 значений
+  DISABLE = 0;
+  DYNAMIC_VALUES = 1;
+  ENABLE = 2;
+  FADE = 3;
+  RUN_DYNAMIC = 4;
+  RUN_STATIC = 5;
+  STOP = 6;
+  SWITCH_TO_DYNAMIC = 7;
+  SWITCH_TO_STATIC = 8;
+}
+
+enum Enum_CANCELLED {  // 8 значений
+  UNKNOWN_CONVERSATION_STATUS = 0;
+  CANCELLED = 1;
+  DEVICE_NOT_CONNECTED = 2;
+  ENDED = 3;
+  ERROR = 4;
+  LISTENING = 5;
+  LISTENING_COMPLETE = 6;
+  NOT_STARTED = 7;
+}
+
+enum AudioFocusType {  // 8 значений
+  NONE = 0;
+  GAIN = 1;
+  GAIN_TRANSIENT = 2;
+  GAIN_TRANSIENT_EXCLUSIVE = 3;
+  GAIN_TRANSIENT_MAY_DUCK = 4;
+  LOSS = 5;
+  LOSS_TRANSIENT = 6;
+  LOSS_TRANSIENT_CAN_DUCK = 7;
+}
+
+enum Enum_DOWNLOADED {  // 8 значений
+  UNDEFINED_STATUS = 0;
+  DOWNLOADED = 1;
+  DOWNLOADING = 2;
+  ERROR = 3;
+  INVALID = 4;
+  NOT_FOUND = 5;
+  QUEUED = 6;
+  VERIFICATION_FAILED = 7;
+}
+
+enum Enum_ALREADY_SET_UP {  // 7 значений
+  ALREADY_SET_UP = 0;
+  ERROR = 1;
+  GUEST_MISMATCH = 2;
+  GUEST_MODE_DISABLED = 3;
+  GUEST_SETUP_IN_PROGRESS = 4;
+  LOGGED_OUT = 5;
+  NEED_CONNECTION_INFO = 6;
+}
+
+enum AuthState_1 {  // 7 значений
+  UNDEFINED_STATE = 0;
+  REGISTERED = 1;
+  REGISTRATION_IN_PROGRESS = 2;
+  REGISTRATION_REQUESTED = 3;
+  TOKEN_EXPIRED = 4;
+  TOKEN_EXPIRING = 5;
+  TOKEN_REFRESHED = 6;
+}
+
+enum Enum_CLOSE_APP {  // 7 значений
+  CLOSE_APP = 0;
+  GET_IHUB_TOKEN = 1;
+  HEARTBEAT = 2;
+  RUN_APP = 3;
+  RUN_APP_DEEPLINK = 4;
+  SERVER_ACTION = 5;
+  UPDATE_IP = 6;
+}
+
+enum Enum_AUTHORIZED {  // 6 значений
+  AUTHORIZED = 0;
+  DISABLED = 1;
+  ERROR = 2;
+  INPUT_PIN_CODE = 3;
+  SESSION_ALREADY_ACTIVE = 4;
+  TOO_MANY_REQUESTS = 5;
+}
+
+enum Enum_NETWORK_NOT_AVAILABL {  // 6 значений
+  UNKNOWN_ERROR = 0;
+  NETWORK_NOT_AVAILABLE = 1;
+  OK = 2;
+  TIMEOUT = 3;
+  WIFI_NOT_FOUND = 4;
+  WRONG_PASSWORD = 5;
+}
+
+enum Enum_ATTEMPTS_LIMIT_REACH {  // 6 значений
+  ATTEMPTS_LIMIT_REACHED = 0;
+  AUTHORIZED = 1;
+  BAD_SESSION_IDENTIFIERS = 2;
+  DISABLED = 3;
+  ERROR = 4;
+  WRONG_PIN = 5;
+}
+
+enum Enum_CRITICAL_UPDATE {  // 6 значений
+  UNDEFINED_STATE = 0;
+  CRITICAL_UPDATE = 1;
+  DOWNLOADED_UPDATE = 2;
+  IDLE = 3;
+  INSTALLING_UPDATE = 4;
+  UPDATE = 5;
+}
+
+enum Enum_NETWORK_NOT_AVAILABL_1 {  // 6 значений
+  UNKNOWN_ERROR = 0;
+  NETWORK_NOT_AVAILABLE = 1;
+  OK = 2;
+  TIMEOUT = 3;
+  WIFI_NOT_FOUND = 4;
+  WRONG_PASSWORD = 5;
+}
+
+enum Enum_CRITICAL_UPDATE_1 {  // 6 значений
+  UNDEFINED_STATE = 0;
+  CRITICAL_UPDATE = 1;
+  DOWNLOADED_UPDATE = 2;
+  IDLE = 3;
+  INSTALLING_UPDATE = 4;
+  UPDATE = 5;
+}
+
+enum Enum_IDLE {  // 6 значений
+  UNDEFINED_STATUS = 0;
+  IDLE = 1;
+  LISTENING = 2;
+  LISTENING_TO_MUSIC = 3;
+  SPEAKING = 4;
+  THINKING = 5;
+}
+
+enum Enum_CONNECTED {  // 6 значений
+  CONNECTED = 0;
+  CONNECTING = 1;
+  DISCONNECTING = 2;
+  ERROR = 3;
+  NOT_CONNECTED = 4;
+  PAIRED = 5;
+}
+
+enum Enum_END {  // 6 значений
+  END = 0;
+  ERROR = 1;
+  ESA = 2;
+  INIT = 3;
+  READY = 4;
+  WIFI = 5;
+}
+
+enum Enum_CHAIN {  // 6 значений
+  CHAIN = 0;
+  DEFAULT = 1;
+  MOVE_TO_TOP = 2;
+  NO_HISTORY = 3;
+  REPLACE = 4;
+  SINGLE_TOP = 5;
+}
+
+enum Enum_NETWORK_NOT_AVAILABL_2 {  // 6 значений
+  UNKNOWN_ERROR = 0;
+  NETWORK_NOT_AVAILABLE = 1;
+  OK = 2;
+  TIMEOUT = 3;
+  WIFI_NOT_FOUND = 4;
+  WRONG_PASSWORD = 5;
+}
+
+enum Enum_FAIL {  // 6 значений
+  FAIL = 0;
+  HEAD_FINISHED = 1;
+  MAIND_STARTED = 2;
+  STATIC_STARTED = 3;
+  SUCCESS = 4;
+  TAIL_FINISHED = 5;
+}
+
+enum Enum_CONFIGURED {  // 5 значений
+  UNDEFINED_STATE = 0;
+  CONFIGURED = 1;
+  DEVICE_LOCKED = 2;
+  FIRST_SETUP = 3;
+  SETUP = 4;
+}
+
+enum Enum_ESA {  // 5 значений
+  UNDEFINED_AUTH_CONNECTOR = 0;
+  ESA = 1;
+  ESA_MOCK = 2;
+  IAM_PROXY = 3;
+  SMARTBOX_JWT = 4;
+}
+
+enum Enum_ALL_APPS {  // 5 значений
+  UNDEFINED_APP_CATEGORY = 0;
+  ALL_APPS = 1;
+  APPS = 2;
+  GAME = 3;
+  HOME = 4;
+}
+
+enum ConnectionStatus {  // 5 значений
+  UNDEFINED_STATUS = 0;
+  CONNECTED = 1;
+  CONNECTED_NO_INTERNET = 2;
+  CONNECTING = 3;
+  DISCONNECTED = 4;
+}
+
+enum Enum_AUDIO_VIDEO {  // 5 значений
+  AUDIO_VIDEO = 0;
+  GAMEPAD = 1;
+  KEYBOARD = 2;
+  OTHER = 3;
+  REMOTE_CONTROLLER = 4;
+}
+
+enum Enum_DEVICE_LOCKED {  // 5 значений
+  UNDEFINED_CATEGORY = 0;
+  DEVICE_LOCKED = 1;
+  INNER = 2;
+  NETWORK = 3;
+  VPS = 4;
+}
+
+enum Enum_NAVIGATION_BAR {  // 5 значений
+  UNDEFINED = 0;
+  NAVIGATION_BAR = 1;
+  SERP = 2;
+  STACK = 3;
+  START = 4;
+}
+
+enum Enum_ALARM_SERVICE {  // 5 значений
+  ALARM_SERVICE = 0;
+  CALL = 1;
+  ERROR = 2;
+  FULLSCREEN = 3;
+  SMART_APP = 4;
+}
+
+enum Enum_ASSISTANT {  // 5 значений
+  ASSISTANT = 0;
+  ESA_CODE = 1;
+  INSTRUCTION = 2;
+  NOT_DEFINED = 3;
+  SOUND = 4;
+}
+
+enum Enum_CONFIGURED_1 {  // 5 значений
+  UNDEFINED_STATE = 0;
+  CONFIGURED = 1;
+  DEVICE_LOCKED = 2;
+  FIRST_SETUP = 3;
+  SETUP = 4;
+}
+
+enum Enum_DEEPLINK {  // 5 значений
+  UNDEFINED = 0;
+  DEEPLINK = 1;
+  DEVICE_INIT = 2;
+  RABBIT_HOLE = 3;
+  SBERCAST = 4;
+}
+
+enum Enum_SERVER_ACTION {  // 5 значений
+  UNKNOWN_ASSISTANT_SOURCE = 0;
+  SERVER_ACTION = 1;
+  SYSTEM_MESSAGE = 2;
+  TEXT = 3;
+  VOICE = 4;
+}
+
+enum Enum_BLUETOOTH_A {  // 5 значений
+  BLUETOOTH_A = 0;
+  VRCP = 1;
+  FROM_DEVICE_GROUP = 2;
+  FROM_MR_MASTER = 3;
+  OTHER = 4;
+}
+
+enum Enum_FULL_FLOW {  // 5 значений
+  FULL_FLOW = 0;
+  PASSIVE_FLOW = 1;
+  PIN_CODE = 2;
+  SELECT_DEVICE = 3;
+  WAITING_SETUP = 4;
+}
+
+enum Enum_CANCEL_VOICE_INPUT {  // 4 значений
+  UNKNOWN_REQUEST_TYPE = 0;
+  CANCEL_VOICE_INPUT = 1;
+  SEND_VOICE_DATA = 2;
+  START_VOICE_INPUT = 3;
+}
+
+enum Enum_DIRECTIVE {  // 4 значений
+  UNDEFINED = 0;
+  DIRECTIVE = 1;
+  REQUEST = 2;
+  STAR_COMMAND = 3;
+}
+
+enum Enum_FULL_FLOW_1 {  // 4 значений
+  FULL_FLOW = 0;
+  PIN_CODE = 1;
+  SELECT_DEVICE = 2;
+  WAITING_SETUP = 3;
+}
+
+enum AudioStreamType {  // 4 значений
+  STREAM_ALARM = 0;
+  STREAM_ASSISTANT = 1;
+  STREAM_BLUETOOTH = 2;
+  STREAM_MUSIC = 3;
+}
+
+enum Enum_APP_SYSTEM {  // 4 значений
+  APP_SYSTEM = 0;
+  FAVORITE_APPS_UPDATED = 1;
+  NOTIFICATION = 2;
+  START_DIALOG = 3;
+}
+
+enum Enum_BLUETOOTH {  // 4 значений
+  UNKNOWN = 0;
+  BLUETOOTH = 1;
+  MUSIC = 2;
+  SPEECH = 3;
+}
+
+enum Enum_CREATED {  // 4 значений
+  CREATED = 0;
+  FINISH_CONFIGURING = 1;
+  NON_CONFIGURED = 2;
+  START_CONFIGURING = 3;
+}
+
+enum Enum_NETWORK_NOT_AVAILABL_3 {  // 4 значений
+  UNKNOWN_ERROR = 0;
+  NETWORK_NOT_AVAILABLE = 1;
+  WIFI_NOT_FOUND = 2;
+  WRONG_PASSWORD = 3;
+}
+
+enum Enum_FAIL_1 {  // 4 значений
+  UNKNOWN_ACTION = 0;
+  FAIL = 1;
+  INVALID_MESSAGE = 2;
+  SUCCESS = 3;
+}
+
+enum Enum_IEEE_FLOAT_16KHZ_32B {  // 3 значений
+  UNKNOWN_AUDIO_TYPE = 0;
+  IEEE_FLOAT_16KHZ_32BIT = 1;
+  PCM_16KHZ_16BIT = 2;
+}
+
+enum Enum_FAR_FIELD {  // 3 значений
+  UNKNOWN = 0;
+  FAR_FIELD = 1;
+  NEAR_FIELD = 2;
+}
+
+enum Enum_NO_GAMEPAD_SERVICE_O {  // 3 значений
+  NO_GAMEPAD_SERVICE_ON_DEVICE = 0;
+  RESPONSE_OK = 1;
+  RESPONSE_TIMEOUT = 2;
+}
+
+enum Enum_BACKEND_JWT {  // 3 значений
+  BACKEND_JWT = 0;
+  FIRST_SETUP = 1;
+  PIN_AUTH = 2;
+}
+
+enum Enum_OPEN {  // 3 значений
+  OPEN = 0;
+  WEP = 1;
+  WPA = 2;
+}
+
+enum Enum_DHCP {  // 3 значений
+  UNDEFINED_TYPE = 0;
+  DHCP = 1;
+  STATIC = 2;
+}
+
+enum Enum_ERROR {  // 3 значений
+  ERROR = 0;
+  GUEST_MISMATCH = 1;
+  LOGGED_OUT = 2;
+}
+
+enum Enum_NOT_READY {  // 3 значений
+  UNDEFINED = 0;
+  NOT_READY = 1;
+  READY = 2;
+}
+
+enum Enum_DISABLED {  // 3 значений
+  UNDEFINED_STATE = 0;
+  DISABLED = 1;
+  ENABLED = 2;
+}
+
+enum Enum_CEC {  // 3 значений
+  UNDEFINED_TARGET = 0;
+  CEC = 1;
+  IR = 2;
+}
+
+enum Enum_BLACK_LIST {  // 3 значений
+  BLACK_LIST = 0;
+  SILENCE_MODE = 1;
+  TIME_LIMIT = 2;
+}
+
+enum Enum_ADD {  // 3 значений
+  ADD = 0;
+  CLEAR_AND_SET = 1;
+  CLEAR_LIMITED_BY_TIME = 2;
+}
+
+enum Enum_OPEN_1 {  // 3 значений
+  OPEN = 0;
+  WEP = 1;
+  WPA = 2;
+}
+
+enum Enum_BACK {  // 3 значений
+  BACK = 0;
+  MIC = 1;
+  RETRY = 2;
+}
+
+enum Enum_AP {  // 3 значений
+  UNDEFINED = 0;
+  AP = 1;
+  STA = 2;
+}
+
+enum Enum_DELAYED {  // 3 значений
+  DELAYED = 0;
+  FAILED = 1;
+  GRANTED = 2;
+}
+
+enum Enum_DHCP_1 {  // 3 значений
+  UNDEFINED_TYPE = 0;
+  DHCP = 1;
+  STATIC = 2;
+}
+
+enum Enum_BLUETOOTH_AVRCP {  // 3 значений
+  BLUETOOTH_AVRCP = 0;
+  FROM_DEVICE_GROUP = 1;
+  OTHER = 2;
+}
+
+enum Enum_DNS_IPV6_ISSUE {  // 3 значений
+  UNDEFINED_DNS_STATUS = 0;
+  DNS_IPV6_ISSUE = 1;
+  DNS_OK = 2;
+}
+
+enum Enum_BACKWARD {  // 3 значений
+  UNDEFINED_DIRECTION = 0;
+  BACKWARD = 1;
+  FORWARD = 2;
+}
+
+enum Enum_ALL {  // 3 значений
+  ALL = 0;
+  WITHOUT_APPS = 1;
+  WITHOUT_STATE = 2;
+}
+
+enum Enum_ASSISTANT_1 {  // 3 значений
+  ASSISTANT = 0;
+  BUTTON = 1;
+  PUSH = 2;
+}
+
+enum Enum_BACKWARD_1 {  // 3 значений
+  UNDEFINED_DIRECTION = 0;
+  BACKWARD = 1;
+  FORWARD = 2;
+}
+
+enum Enum_BLOCKED {  // 3 значений
+  BLOCKED = 0;
+  LAST_PLAY = 1;
+  UNLOCKED = 2;
+}
+
+enum Enum_LEFT {  // 3 значений
+  UNDEFINED = 0;
+  LEFT = 1;
+  RIGHT = 2;
+}
+
+enum Enum_BUTTON {  // 3 значений
+  BUTTON = 0;
+  GESTURE = 1;
+  TAP = 2;
+}
+
+enum Enum_CONNECTING {  // 3 значений
+  CONNECTING = 0;
+  ERROR = 1;
+  SUCCESS = 2;
+}
+
+enum Enum_CONNECTING_1 {  // 3 значений
+  CONNECTING = 0;
+  ERROR = 1;
+  SUCCESS = 2;
+}
+
+enum Enum_AUDIO {  // 3 значений
+  AUDIO = 0;
+  BLE = 1;
+  HOTSPOT = 2;
+}
+
+enum Enum_DEFAULT {  // 3 значений
+  DEFAULT = 0;
+  HIGH = 1;
+  MAX = 2;
+}
+
+enum Enum_INSTALL {  // 3 значений
+  INSTALL = 0;
+  NO_INSTALL = 1;
+  SILENT_INSTALL = 2;
+}
+
+enum Enum_DISABLE_1 {  // 3 значений
+  NONE = 0;
+  DISABLE = 1;
+  ENABLE = 2;
+}
+
+enum Enum_FINISHED {  // 3 значений
+  FINISHED = 0;
+  INTERRUPTED = 1;
+  STARTED = 2;
+}
+
+enum Enum_NETWORK_NOT_AVAILABL_4 {  // 3 значений
+  UNKNOWN_ERROR = 0;
+  NETWORK_NOT_AVAILABLE = 1;
+  OK = 2;
+}
+
+enum Enum_MASTER {  // 3 значений
+  MASTER = 0;
+  NOT_SYNCED = 1;
+  SYNCED = 2;
+}
+
+enum Enum_SBERBOOM {  // 3 значений
+  UNDEFINED = 0;
+  SBERBOOM = 1;
+  SBERBOOM_MINI = 2;
+}
+

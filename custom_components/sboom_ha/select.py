@@ -7,20 +7,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._entity_base import SboomEntity
-from .const import DOMAIN, PLAYBACK_SPEED_OPTIONS
+from .const import PLAYBACK_SPEED_OPTIONS, REPEAT_TO_CANONICAL
 from .coordinator import SboomCoordinator
 
 # Команды идут к колонке через единый WS с собственным lock — HA-параллелизм не нужен.
 PARALLEL_UPDATES = 0
 
 REPEAT_OPTIONS = ["off", "playlist", "track"]
-REPEAT_MAP_FROM_API = {
-    "none":     "off",
-    "playlist": "playlist",
-    "all":      "playlist",
-    "track":    "track",
-    "one":      "track",
-}
+# Канон REPEAT_TO_CANONICAL → исторические опции этого select
+# (менять labels нельзя — сломаются история state и переводы).
+_CANON_TO_OPTION = {"off": "off", "all": "playlist", "one": "track"}
 
 
 async def async_setup_entry(
@@ -28,7 +24,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coord: SboomCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coord: SboomCoordinator = entry.runtime_data
     async_add_entities([
         SboomRepeatSelect(coord, entry),
         SboomPlaybackSpeedSelect(coord, entry),
@@ -51,7 +47,8 @@ class SboomRepeatSelect(SboomEntity, SelectEntity):
         track = self.coordinator.track
         if not track or not track.repeat:
             return None
-        return REPEAT_MAP_FROM_API.get(track.repeat.lower())
+        canon = REPEAT_TO_CANONICAL.get(track.repeat.lower())
+        return _CANON_TO_OPTION.get(canon) if canon else None
 
     async def async_select_option(self, option: str) -> None:
         await self._run_command(

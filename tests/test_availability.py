@@ -1,11 +1,10 @@
 """Тесты доступности entity при разрыве WS-сессии с колонкой."""
 from __future__ import annotations
 
-from tests._fakes import build_coordinator, make_state, make_track
-
 from sboom_ha.coordinator import EVENT_CONNECTION_CHANGED
 from sboom_ha.media_player import SboomMediaPlayer
 
+from tests._fakes import build_coordinator, make_state, make_track
 
 # ─────────────────── available ───────────────────
 

@@ -1,6 +1,6 @@
 {
   "name": "SBoom (LAN)",
-  "homeassistant": "2024.12",
+  "homeassistant": "2024.12.0",
   "country": "RU",
   "render_readme": true
 }

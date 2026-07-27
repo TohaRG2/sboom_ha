@@ -29,6 +29,10 @@
           "host": "IP address",
           "port": "Port"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-pair {name}",
+        "description": "{name} ({host}) needs re-authorization (e.g. after a factory reset).\n\n**Press the \"+\" button on the speaker**, then submit.\n\n(Timeout: {timeout} seconds)"
       }
     },
     "error": {
@@ -37,13 +41,29 @@
     },
     "abort": {
       "already_configured": "This speaker is already configured.",
-      "incomplete_discovery": "Discovered service is missing required device id."
+      "incomplete_discovery": "Discovered service is missing required device id.",
+      "reauth_successful": "Re-authentication was successful.",
+      "reconfigure_successful": "Re-configuration was successful."
     }
   },
   "issues": {
     "speaker_unreachable": {
       "title": "{name} is unreachable",
-      "description": "Speaker has been offline for {minutes} minutes. Check the device power, network connection, and IP address. If the IP changed, use Settings → Integrations → SBoom → ⋮ → Reconfigure."
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "{name} is unreachable",
+            "description": "If the speaker got a new IP address (e.g. from DHCP), enter it below — the pairing token is kept, no re-pairing needed. Make sure the speaker is powered on and reachable from Home Assistant.",
+            "data": {
+              "host": "IP address",
+              "port": "Port"
+            }
+          }
+        },
+        "error": {
+          "cannot_connect": "Cannot connect to the speaker at this address. Check the IP/port and LAN reachability."
+        }
+      }
     }
   },
   "options": {
@@ -55,37 +75,65 @@
           "volume_poll_interval": "Volume poll interval, seconds",
           "keepalive_interval": "WebSocket keepalive interval, seconds",
           "availability_threshold": "Disconnect threshold (failed reconnects)",
-          "lyrics_enabled": "Fetch synced lyrics from Lrclib.net"
+          "lyrics_enabled": "Fetch synced lyrics from Lrclib.net",
+          "lyrics_netease_fallback": "Use NetEase as a fallback lyrics source",
+          "lyrics_offset": "Lyrics timing offset, seconds (+ earlier / − later)",
+          "karaoke_fill": "Karaoke fill (highlight the line as it is sung)",
+          "panel_enabled": "Show the player panel in the sidebar"
         }
       }
     }
   },
   "entity": {
     "button": {
-      "next_track":      { "name": "Next track" },
-      "previous_track":  { "name": "Previous track" },
-      "play_pause":      { "name": "Play / Pause" },
-      "like":            { "name": "Like current track" },
-      "dislike":         { "name": "Dislike current track" },
-      "remove_like":     { "name": "Remove like" },
-      "remove_dislike":  { "name": "Remove dislike" },
-      "bt_pairing":      { "name": "Bluetooth pairing" },
-      "find_remote":     { "name": "Find remote" }
+      "next_track": {
+        "name": "Next track"
+      },
+      "previous_track": {
+        "name": "Previous track"
+      },
+      "play_pause": {
+        "name": "Play / Pause"
+      },
+      "like": {
+        "name": "Like current track"
+      },
+      "dislike": {
+        "name": "Dislike current track"
+      },
+      "remove_like": {
+        "name": "Remove like"
+      },
+      "remove_dislike": {
+        "name": "Remove dislike"
+      },
+      "bt_pairing": {
+        "name": "Bluetooth pairing"
+      },
+      "find_remote": {
+        "name": "Find remote"
+      }
     },
     "number": {
-      "volume": { "name": "Volume" }
+      "volume": {
+        "name": "Volume"
+      }
     },
     "switch": {
-      "shuffle": { "name": "Shuffle" },
-      "mute":    { "name": "Mute" }
+      "shuffle": {
+        "name": "Shuffle"
+      },
+      "mute": {
+        "name": "Mute"
+      }
     },
     "select": {
       "repeat": {
         "name": "Repeat mode",
         "state": {
-          "off":       "Off",
-          "playlist":  "Playlist",
-          "track":     "Track"
+          "off": "Off",
+          "playlist": "Playlist",
+          "track": "Track"
         }
       },
       "playback_speed": {
@@ -93,32 +141,226 @@
       }
     },
     "sensor": {
-      "lyrics_current_line":  { "name": "Lyrics current line" },
-      "lyrics":               { "name": "Lyrics" },
-      "led_brightness":       { "name": "Display brightness" },
-      "alarms":               { "name": "Alarms" },
-      "timers":               { "name": "Timers" },
-      "active_app":           { "name": "Active app" },
-      "assistant_character":  { "name": "Assistant character" },
-      "multiroom_mode":       { "name": "Multiroom mode" },
-      "network_type":         { "name": "Connection type" },
-      "paired_bt":            { "name": "Paired Bluetooth devices" }
+      "lyrics_current_line": {
+        "name": "Lyrics current line"
+      },
+      "lyrics": {
+        "name": "Lyrics",
+        "state": {
+          "no_track": "No track",
+          "loading": "Loading",
+          "available": "Available",
+          "instrumental": "Instrumental",
+          "not_found": "Not found"
+        }
+      },
+      "led_brightness": {
+        "name": "Display brightness"
+      },
+      "alarms": {
+        "name": "Alarms"
+      },
+      "timers": {
+        "name": "Timers"
+      },
+      "active_app": {
+        "name": "Active app"
+      },
+      "assistant_character": {
+        "name": "Assistant character"
+      },
+      "playback_mode": {
+        "name": "Playback mode"
+      },
+      "multiroom_mode": {
+        "name": "Multiroom mode"
+      },
+      "device_links": {
+        "name": "Linked devices"
+      },
+      "network_type": {
+        "name": "Connection type"
+      },
+      "paired_bt": {
+        "name": "Paired Bluetooth devices"
+      },
+      "ip_address": {
+        "name": "IP address"
+      },
+      "timezone": {
+        "name": "Time zone"
+      },
+      "age_mode": {
+        "name": "Age mode"
+      },
+      "clock_skew": {
+        "name": "Clock skew vs Home Assistant"
+      },
+      "coordinates": {
+        "name": "Coordinates"
+      },
+      "next_alarm": {
+        "name": "Next alarm"
+      },
+      "next_timer": {
+        "name": "Next timer"
+      },
+      "firmware_channel": {
+        "name": "Firmware channel"
+      },
+      "foreground_app": {
+        "name": "Foreground app"
+      },
+      "illuminance": {
+        "name": "Illuminance"
+      },
+      "soc_temperature": {
+        "name": "SoC temperature"
+      },
+      "zigbee_inventory": {
+        "name": "Zigbee devices"
+      },
+      "matter_inventory": {
+        "name": "Matter devices"
+      }
     },
     "binary_sensor": {
-      "led_display":          { "name": "Display" },
-      "active":               { "name": "Active" },
-      "stereo_pair":          { "name": "Stereo pair" },
-      "subscription_device":  { "name": "Subscription device" },
-      "home_security":        { "name": "Home security" },
-      "morning_show":         { "name": "Morning show" }
+      "led_display": {
+        "name": "Display"
+      },
+      "active": {
+        "name": "Active"
+      },
+      "stereo_pair": {
+        "name": "Stereo pair"
+      },
+      "subscription_device": {
+        "name": "Subscription device"
+      },
+      "home_security": {
+        "name": "Home security"
+      },
+      "morning_show": {
+        "name": "Morning show"
+      },
+      "alarm_ringing": {
+        "name": "Alarm ringing"
+      },
+      "track_has_lyrics": {
+        "name": "Track has lyrics"
+      },
+      "assistant_auto_volume": {
+        "name": "Assistant auto volume"
+      },
+      "proactivity_notification": {
+        "name": "Assistant proactive notification"
+      }
     },
     "camera": {
-      "lyrics_camera": { "name": "Lyrics on TV" }
+      "lyrics_camera": {
+        "name": "Lyrics on TV"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Location"
+      }
+    },
+    "calendar": {
+      "schedule": {
+        "name": "Schedule"
+      }
     }
   },
   "exceptions": {
     "command_failed": {
       "message": "Could not run \"{action}\": speaker unavailable ({error})"
+    },
+    "no_loaded_speakers": {
+      "message": "No loaded SBoom speakers match this call. Check that the integration is set up and the device is targeted correctly."
+    }
+  },
+  "services": {
+    "refresh_metadata": {
+      "name": "Refresh metadata",
+      "description": "Force-fetch the current track and speaker state without waiting for the poll cycle.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "SberBoom device (defaults to all configured)."
+        }
+      }
+    },
+    "reauth": {
+      "name": "Re-authenticate (re-pair)",
+      "description": "Start the re-pairing process. Press the \"+\" button on the speaker after calling the service.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "SberBoom device to re-authenticate."
+        }
+      }
+    },
+    "bluetooth_device": {
+      "name": "Bluetooth device command",
+      "description": "Connect, disconnect or remove a paired Bluetooth device of the speaker.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "SberBoom device (defaults to all configured)."
+        },
+        "mac_address": {
+          "name": "MAC address",
+          "description": "Bluetooth device MAC (see the devices attribute of the Paired Bluetooth devices sensor)."
+        },
+        "command": {
+          "name": "Command",
+          "description": "Action to perform."
+        }
+      }
+    },
+    "play_music": {
+      "name": "Play music",
+      "description": "Play content on the speaker by a zvuk.com link, a search query, or id + kind.",
+      "fields": {
+        "device_id": {
+          "name": "Device",
+          "description": "SberBoom speaker (defaults to all configured)."
+        },
+        "url": {
+          "name": "Link",
+          "description": "zvuk.com link (e.g. https://zvuk.com/track/84279897)."
+        },
+        "query": {
+          "name": "Query",
+          "description": "Search query — the first matching result is played."
+        },
+        "id": {
+          "name": "ID",
+          "description": "Catalog content id (used together with Kind)."
+        },
+        "kind": {
+          "name": "Kind",
+          "description": "Content kind for id: track / artist / release / playlist / podcast / abook."
+        }
+      }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "track_changed": "Track changed",
+      "playback_changed": "Playback state changed",
+      "volume_changed": "Volume changed",
+      "connection_changed": "Connection changed"
+    },
+    "action_type": {
+      "play": "Play",
+      "pause": "Pause",
+      "next": "Next track",
+      "previous": "Previous track",
+      "refresh_metadata": "Refresh metadata",
+      "find_remote": "Find remote",
+      "bt_pairing": "Bluetooth pairing"
     }
   }
 }

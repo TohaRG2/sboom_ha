@@ -4,7 +4,6 @@ from __future__ import annotations
 import struct
 
 import pytest
-
 from sboom_ha._tlv import field
 from sboom_ha.api import SberSpeakerClient
 from sboom_ha.const import (

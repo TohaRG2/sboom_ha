@@ -1,0 +1,9 @@
+Фоны-заглушки караоке-камеры (используются, когда обложка не найдена).
+Все изображения — CC0 1.0 (public domain, атрибуция не требуется).
+
+bg_0.jpg — StockSnap, CC0 1.0 (https://stocksnap.io/photo/OC20CAHMDU)
+bg_1.jpg — StockSnap, CC0 1.0 (https://stocksnap.io/photo/HZT4DCX6GN)
+bg_2.jpg — StockSnap, CC0 1.0 (https://stocksnap.io/photo/CKDVQPAIBQ)
+bg_3.jpg — Flickr,    CC0 1.0 (https://www.flickr.com/photos/30344354318)
+
+Даунскейл до 640×360 + JPEG q85 (изображение всё равно блюрится при рендере).

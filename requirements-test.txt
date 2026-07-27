@@ -1,0 +1,8 @@
+# Dev/test-зависимости. Тесты — чистый Python,
+# pytest-homeassistant-custom-component намеренно НЕ используется.
+-r requirements.txt
+pytest
+pytest-asyncio
+aiohttp
+ruff
+python-dateutil

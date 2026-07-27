@@ -11,7 +11,8 @@ import inspect
 import logging
 import ssl
 import uuid
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import websockets
 
@@ -26,6 +27,8 @@ from ._tlv import field as _field
 from .const import (
     DEFAULT_PORT,
     DEFAULT_USER_AGENT,
+    ENVELOPE_FIELD_MSG_ID,
+    ENVELOPE_FIELD_REQUEST_DATA,
     MEDIA_CMD_DISLIKE,
     MEDIA_CMD_LIKE,
     MEDIA_CMD_MUTE,
@@ -41,24 +44,33 @@ from .const import (
     MEDIA_CMD_SHUFFLE_OFF,
     MEDIA_CMD_SHUFFLE_ON,
     MEDIA_CMD_UNMUTE,
-    OP_GET_META_DATA,
-    OP_GET_PLAYING_QUEUE,
-    OP_GET_STATE,
-    OP_KEEP_ALIVE,
-    OP_MEDIA_COMMAND,
     OP_BT_DEVICE_COMMAND,
     OP_BT_DISCOVERABLE,
     OP_FIND_REMOTE,
+    OP_GET_META_DATA,
     OP_GET_PAIRED_BT,
+    OP_GET_PLAYING_QUEUE,
     OP_GET_SCANNED_BT,
+    OP_GET_STATE,
+    OP_KEEP_ALIVE,
+    OP_MEDIA_COMMAND,
     OP_PIN_CONNECT,
     OP_SET_PLAYBACK_SPEED,
     OP_SET_TRACK_POS,
     OP_SET_VOLUME,
     PAIR_BUTTON_TIMEOUT_SEC,
+    PAIR_CONFIRM_OK,
+    PAIR_CONFIRM_REJECTED,
+    PAIR_STATUS_AUTHORIZED,
+    PAIR_STATUS_BUSY,
+    PAIR_STATUS_DISABLED,
+    PAIR_STATUS_WAITING,
     PLAYBACK_SPEED_MAX,
     PLAYBACK_SPEED_MIN,
+    REPEAT_TO_CANONICAL,
     TOKEN_TYPE_PIN_AUTH,
+    WS_PING_INTERVAL_SEC,
+    WS_PING_TIMEOUT_SEC,
 )
 
 
@@ -105,10 +117,10 @@ class SberSpeakerClient:
         self,
         host: str,
         port: int = DEFAULT_PORT,
-        client_id: Optional[str] = None,
+        client_id: str | None = None,
         client_name: str = "Home Assistant",
-        pin_access_token: Optional[str] = None,
-        on_event: Optional[Callable[[bytes, dict[int, Any]], Awaitable[None]]] = None,
+        pin_access_token: str | None = None,
+        on_event: Callable[[bytes, dict[int, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -117,8 +129,8 @@ class SberSpeakerClient:
         self.pin_access_token = pin_access_token
         self._on_event = on_event
 
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
-        self._listener_task: Optional[asyncio.Task] = None
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._listener_task: asyncio.Task | None = None
         self._pending: dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
         # Выставляется при выходе из _listen_loop (обрыв связи). Супервизор
@@ -147,7 +159,11 @@ class SberSpeakerClient:
             "ssl": ssl_ctx,
             "max_size": 2**20,
             "open_timeout": 10,
-            "ping_interval": None,
+            # Транспортный heartbeat: pong обязателен по RFC 6455, поэтому
+            # безответный ping = half-open TCP → библиотека сама закрывает
+            # соединение, _listen_loop завершается, супервизор реконнектит.
+            "ping_interval": WS_PING_INTERVAL_SEC,
+            "ping_timeout": WS_PING_TIMEOUT_SEC,
             _HEADERS_KWARG: [("User-Agent", DEFAULT_USER_AGENT)],
         }
         self._ws = await websockets.connect(url, **connect_kwargs)
@@ -217,67 +233,63 @@ class SberSpeakerClient:
             remain = deadline - loop.time()
             try:
                 resp = await asyncio.wait_for(self._ws.recv(), timeout=remain)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 _LOGGER.warning("pair: timed out waiting for pair-confirm response")
                 break
             msg_idx += 1
             parsed = _decode_tlv(resp if isinstance(resp, (bytes, bytearray)) else resp.encode())
-            _LOGGER.info("pair: msg #%d (%d bytes) parsed=%s", msg_idx, len(resp), parsed)
+            # ВАЖНО: сырые parsed-поля pair-ответов НЕ логировать — они содержат
+            # pin-токен (полный доступ к колонке), а лог часто прикладывают к issue.
+            _LOGGER.debug("pair: msg #%d (%d bytes)", msg_idx, len(resp))
 
-            req_data = parsed.get(5)
+            req_data = parsed.get(ENVELOPE_FIELD_REQUEST_DATA)
             if not isinstance(req_data, dict):
                 continue
 
             # Первый ответ (поле 4): статус-код в sub[1], опц. данные в sub[2].
-            # Эмпирически наблюдаемые статусы:
-            #   1 → ждём подтверждения (нажатия "+"), sub[2] — идентификатор сессии
-            #   2 → авторизовано, sub[2] — pin-токен
-            #   3 → сессия уже занята
-            #   5 → pair-режим выключен на колонке
             pin_resp = req_data.get(4)
             if isinstance(pin_resp, dict):
                 status = pin_resp.get(1)
-                if status == 2:
+                if status == PAIR_STATUS_AUTHORIZED:
                     token = pin_resp.get(2)
                     if isinstance(token, str) and len(token) >= 16:
-                        _LOGGER.info("pair: token received (init-stage) -> %s", token)
+                        _LOGGER.info("pair: token received (init-stage), %d chars", len(token))
                         self.pin_access_token = token
                         return token
-                elif status == 1:
+                elif status == PAIR_STATUS_WAITING:
                     sess = pin_resp.get(2)
                     _LOGGER.info(
                         "pair: waiting for '+' button press (session=%s)", sess
                     )
                     # просто ждём — колонка пришлёт следующий ответ после нажатия
                     continue
-                elif status == 3:
+                elif status == PAIR_STATUS_BUSY:
                     raise PairTimeout("pair: session already active")
-                elif status == 5:
+                elif status == PAIR_STATUS_DISABLED:
                     raise PairTimeout("pair: mode disabled on speaker")
 
-            # Второй ответ (поле 6) — после нажатия "+":
-            #   1 → авторизовано, sub[2] — финальный pin-токен
-            #   2 → отказано
+            # Второй ответ (поле 6) — после нажатия "+".
             confirm = req_data.get(6)
             if isinstance(confirm, dict):
                 status = confirm.get(1)
-                if status == 1:
+                if status == PAIR_CONFIRM_OK:
                     token = confirm.get(2)
                     if isinstance(token, str) and len(token) >= 16:
-                        _LOGGER.info("pair: token received (confirm-stage) -> %s", token)
+                        _LOGGER.info("pair: token received (confirm-stage), %d chars", len(token))
                         self.pin_access_token = token
                         return token
-                elif status == 2:
+                elif status == PAIR_CONFIRM_REJECTED:
                     raise PairTimeout("pair: rejected by speaker")
         raise PairTimeout("pair timed out — кнопка '+' не была нажата")
 
     # ────────────────────────────── high-level commands ──────────────────────────────
 
-    async def get_state(self) -> SpeakerState:
+    async def get_state(self) -> SpeakerState | None:
+        """None — колонка ответила, но payload не распарсился (state сохраняем)."""
         resp = await self._request_response(_field(OP_GET_STATE, 2, _field(1, 2, b"")))
         return self._extract_state(resp)
 
-    async def get_metadata(self) -> Optional[TrackInfo]:
+    async def get_metadata(self) -> TrackInfo | None:
         resp = await self._request_response(_field(OP_GET_META_DATA, 2, _field(1, 2, b"")))
         return self._extract_track(resp)
 
@@ -343,15 +355,14 @@ class SberSpeakerClient:
         await self._send_media_command(MEDIA_CMD_SHUFFLE_ON if on else MEDIA_CMD_SHUFFLE_OFF)
 
     async def media_repeat(self, mode: str) -> None:
-        """mode: 'none' | 'playlist'/'all' | 'track'/'one'"""
-        cmd_by_mode = {
-            "none":     MEDIA_CMD_REPEAT_NONE,
-            "playlist": MEDIA_CMD_REPEAT_PLAYLIST,
-            "all":      MEDIA_CMD_REPEAT_PLAYLIST,
-            "track":    MEDIA_CMD_REPEAT_TRACK,
-            "one":      MEDIA_CMD_REPEAT_TRACK,
-        }
-        await self._send_media_command(cmd_by_mode.get(mode.lower(), MEDIA_CMD_REPEAT_NONE))
+        """mode — любой синоним из REPEAT_TO_CANONICAL ('none'/'off', 'playlist'/'all', 'track'/'one')."""
+        canon = REPEAT_TO_CANONICAL.get(mode.lower(), "off")
+        cmd = {
+            "off": MEDIA_CMD_REPEAT_NONE,
+            "all": MEDIA_CMD_REPEAT_PLAYLIST,
+            "one": MEDIA_CMD_REPEAT_TRACK,
+        }[canon]
+        await self._send_media_command(cmd)
 
     async def seek_to(self, position_sec: int) -> None:
         # seek-операция: единица — секунды (наблюдаемое поведение)
@@ -392,12 +403,12 @@ class SberSpeakerClient:
         cast = _field(OP_MEDIA_COMMAND, 2, request_inner)
         await self._fire_and_forget(cast)
 
-    def _envelope(self, req_id: str, request_data: bytes, *, with_token: bool = True) -> bytes:
+    def _envelope(self, req_id: str, request_data: bytes) -> bytes:
         parts = [
             _field(1, 0, 2),                                 # type=REQUEST
             _field(2, 2, req_id.encode()),                   # id
         ]
-        if with_token and self.pin_access_token:
+        if self.pin_access_token:
             parts.append(_field(3, 2, self.pin_access_token.encode()))
         parts += [
             _field(5, 2, request_data),                      # request_data
@@ -409,20 +420,25 @@ class SberSpeakerClient:
         return b"".join(parts)
 
     async def _fire_and_forget(self, request_data: bytes) -> None:
-        if not self._ws:
+        # Локальная ссылка: параллельный close() может обнулить self._ws
+        # между проверкой и send — тогда был бы AttributeError вместо
+        # ConnectionClosed, который супервизор умеет обрабатывать.
+        ws = self._ws
+        if not ws:
             raise RuntimeError("not connected")
         async with self._lock:
-            await self._ws.send(self._envelope(str(uuid.uuid4()), request_data))
+            await ws.send(self._envelope(str(uuid.uuid4()), request_data))
 
     async def _request_response(self, request_data: bytes, timeout: float = 5.0) -> bytes:
-        if not self._ws:
+        ws = self._ws
+        if not ws:
             raise RuntimeError("not connected")
         req_id = str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[req_id] = fut
         try:
             async with self._lock:
-                await self._ws.send(self._envelope(req_id, request_data))
+                await ws.send(self._envelope(req_id, request_data))
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._pending.pop(req_id, None)
@@ -435,7 +451,7 @@ class SberSpeakerClient:
                     msg = msg.encode()
                 parsed = _decode_tlv(msg)
                 # сматчить с pending по id, либо считать unsolicited
-                msg_id = parsed.get(2)
+                msg_id = parsed.get(ENVELOPE_FIELD_MSG_ID)
                 if isinstance(msg_id, str) and msg_id in self._pending:
                     fut = self._pending.pop(msg_id)
                     if not fut.done():
@@ -467,12 +483,12 @@ class SberSpeakerClient:
     # ────────────────────────────── parsers ──────────────────────────────
 
     @staticmethod
-    def parse_state(raw: bytes) -> SpeakerState:
+    def parse_state(raw: bytes) -> SpeakerState | None:
         """Public wrapper — делегирует в _parsers.parse_state."""
         return _parse_state(raw)
 
     @staticmethod
-    def parse_track(raw: bytes) -> Optional[TrackInfo]:
+    def parse_track(raw: bytes) -> TrackInfo | None:
         """Public wrapper — делегирует в _parsers.parse_track."""
         return _parse_track(raw)
 

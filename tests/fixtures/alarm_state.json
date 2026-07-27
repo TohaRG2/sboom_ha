@@ -1,0 +1,52 @@
+{
+  "alarm": {
+    "alarms": [
+      {
+        "description": "",
+        "enabled": true,
+        "ics": "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260711T050003Z\r\nRRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR,SA,SU\r\nUID:82bc91fa-1bdd-45dd-a2c6-f28137ce48b0\r\nEND:VEVENT\r\nPRODID:ics.py\r\nVERSION:2.0\r\nEND:VCALENDAR",
+        "id": "82bc91fa-1bdd-45dd-a2c6-f28137ce48b0",
+        "snoozed_alarm": false
+      },
+      {
+        "description": "",
+        "enabled": true,
+        "ics": "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260713T040040Z\r\nRRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR\r\nUID:0d1f064e-5b34-458a-aee1-37214cc222a8\r\nEND:VEVENT\r\nPRODID:ics.py\r\nVERSION:2.0\r\nEND:VCALENDAR",
+        "id": "0d1f064e-5b34-458a-aee1-37214cc222a8",
+        "snoozed_alarm": false
+      }
+    ],
+    "alarmsCounter": 2,
+    "clocks": [],
+    "playing": null,
+    "status": 1,
+    "timers": [
+      {
+        "description": "2 часа",
+        "id": "5106a3fc-da09-455a-9376-8618ca33d68a",
+        "intervalSec": 7200,
+        "status": "ticking",
+        "timeLeftSec": 6489
+      }
+    ]
+  },
+  "reminders": {
+    "reminders": {
+      "time_reminders": {
+        "2026-07-10T11:48:00.000Z": [
+          {
+            "createdAt": 1783676936.351828,
+            "cron": null,
+            "devices": {"31465833500100000b343349": "sberboom-r2"},
+            "id": "3410e067-fca0-4183-9b92-96f7897d5da3",
+            "internal_client": null,
+            "push_mobile": true,
+            "reminderTime": "2026-07-10T11:48:00.000Z",
+            "subtitle": "",
+            "title": "встреча"
+          }
+        ]
+      }
+    }
+  }
+}
