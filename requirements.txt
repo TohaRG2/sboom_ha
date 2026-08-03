@@ -1,4 +1,4 @@
 # Runtime-зависимости — синхронизированы с custom_components/sboom_ha/manifest.json
-websockets>=16.1.1
+websockets>=17.0
 Pillow>=10.0
 voluptuous>=0.13
