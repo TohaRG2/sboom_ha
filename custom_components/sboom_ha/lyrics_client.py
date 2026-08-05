@@ -102,8 +102,8 @@ async def _request_get(
     album: str | None,
     duration_sec: int | None,
     timeout: float,
-) -> dict | None | str:
-    """Один запрос. Возвращает dict (data), None (network err), или 'not_found'."""
+) -> dict | str | None:
+    """Один запрос. Возвращает dict (data), 'not_found' (str), или None (network err)."""
     params: dict[str, str] = {"track_name": track, "artist_name": artist}
     if album:
         params["album_name"] = album
