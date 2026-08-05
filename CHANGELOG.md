@@ -4,6 +4,18 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 версионирование — [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **`camera.<name>_lyrics_na_tv`: артист/заголовок теперь обновляются в караоке-стриме для Bluetooth и радио.** `artist` вычислялся один раз до while-loop и оставался frozen. Цикл живёт, пока `track_id` неизменен — а для BT/radio это `None` (либо stream-id) постоянно, при этом метаданные меняются с каждым треком. Итог: `track.title` брался свежий из `coordinator.track` и обновлялся, а `artist` застревал. Перенёс вычисление внутрь loop после `track = self.coordinator.track` (commit `4577285`).
+
+### CI / Docs / Chores
+- **CI**: добавлены `httpx` и `respx` в `requirements-test.txt` (mock httpx-запросов в тестах `lyrics_client`/`zvuk_client`; исправляет красный CI, появившийся с 0.35.0). Отражено в CLAUDE.md.
+- **i18n**: убран URL из `service.play_music.url.description` в `translations/{en,ru}.json` — hassfest translations validation ругался на URL в описании (commit `dde54c7`).
+- **CI**: `actions/setup-python@v5 → v7` (dependabot).
+- **Docs**: `sboom.play_music` → `sboom_ha.play_music` в README (правильный DOMAIN); добавлен сервис в таблицу «Сервисы»; `httpx>=0.27` внесён в раздел «Зависимости»; уточнён диапазон скорости `0.5×–2.0×`.
+- **CLAUDE.md**: перегенерированы таблицы `OP_*` и `MEDIA_CMD_*` из `const.py`, добавлены `MEDIA_CMD_START_MULTIROOM=8`, `OP_FIND_REMOTE=13`, BT-семейство `OP 19-22`, `OP_SET_PLAYBACK_SPEED=23`. Обновлена архитектурная диаграмма: 10 платформ вместо 7, добавлен NetEase и Zvuk CDN как внешние зависимости.
+
 ## [0.35.2]
 
 ### Fixed
@@ -21,10 +33,13 @@
 - **Встроенная премиум-панель плеера** в боковом меню Home Assistant («SberBoom»): immersive-карточка (обложка во весь фон, фрост-стекло, ambient-glow из цвета обложки, скраббер, транспорт) + люксовые SVG-контролы. Оформление на **нативных токенах темы HA** (палитра/акцент/радиусы адаптируются к теме пользователя). Отображает версию интеграции; отзывчива до мобильного; на простое схлопывается.
 - **Единый drill-down браузер** список+поиск **без табов**: очередь → поиск (Исполнители/Альбомы/Треки/Плейлисты) → **артист** (аватар, топ-треки, дискография) → **альбом** (треклист) → трек. Навигационный стек, кнопка «назад», персистентный поиск.
 - **Богатый поиск и метаданные Sber Звук** — обложки, дискография, треклисты; работает с домашнего IP без VPN. Backend: standalone `ZvukClient` (get_tracks/get_artists/get_releases/get_artist/get_release, поиск, доминирующий цвет обложки) + WebSocket API панели.
-- **Расширенные контролы**: лайк/дизлайк (тюнинг персональной волны), скорость воспроизведения (0.75×–2×), найти пульт, shuffle/repeat, громкость.
+- **Расширенные контролы**: лайк/дизлайк (тюнинг персональной волны), скорость воспроизведения (0.5×–2.0×), найти пульт, shuffle/repeat, громкость.
 - **Поддержка нескольких колонок** — селектор устройства; команды/подписка/очередь/поиск адресуются по `entry_id`.
 - **Опция включения/выключения панели** (Settings → Integrations → SBoom → Configure → «Показывать панель плеера в боковом меню»).
-- **Сервис `sboom.play_music`** — запуск по ссылке zvuk.com, поисковому запросу или id+kind.
+- **Сервис `sboom_ha.play_music`** — запуск по ссылке zvuk.com, поисковому запросу или id+kind.
+
+### Dependencies
+- **Новая рантайм-зависимость `httpx>=0.27`** в `manifest.json` (добавлена ради `ZvukClient` и миграции `lyrics_client`). Устанавливается HA автоматически при обновлении.
 
 ### Fixed
 - Мгновенные обновления панели (push-подписка на координатор вместо 5-сек поллинга); прогресс-бар якорится к серверному снимку и идёт плавно, корректен после перезагрузки.
@@ -487,7 +502,7 @@
 - Auto-discovery через Zeroconf (`_staros._tcp.local.`)
 - MediaPlayer с volume/mute/play/pause/next/prev/seek/shuffle/repeat
 - Cover image из public Zvuk CDN (`https://cdn-image.zvuk.com/pic`)
-- Sub-plaекtforms: button (like/dislike/transport), number (volume), switch (shuffle/mute), select (repeat)
+- Sub-platforms: button (like/dislike/transport), number (volume), switch (shuffle/mute), select (repeat)
 
 ## [0.1.0]
 

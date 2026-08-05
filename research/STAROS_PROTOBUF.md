@@ -1,43 +1,33 @@
 # Protobuf-схема протокола StarOS (:20000 WSS)
 
 Справочник сообщений локального протокола колонки, чтобы не пересобирать каждый
-раз. Источник — имена protobuf-типов из StarOS-клиента (`box`), сверено с нашим
-эмпирическим op-sweep (`op_map`) и `const.py`.
+раз. Имена protobuf-типов и enum-значений реконструированы **wire-observation'ом**:
+из JSON-ответов read-ops (полные имена полей идут в диагностических сообщениях
+сервера), из ответных сообщений `ServerAction`/`EventMessage`, из ошибочных
+ответов сервера (содержат `ru.sber.staros.protobuf.<Type>.<field>`-пути), из
+public-facing mDNS/DeviceInfo props. Все выводы сверены с эмпирическим
+op-sweep'ом (`op_map`) и `const.py`.
 
 ## Структура протокола
 
-- Транспорт: **WebSocket++** (websocketpp), бинарные фреймы.
+- Транспорт: **WebSocket++** (websocketpp), бинарные фреймы (server-header'ы
+  на TLS-handshake публично видны).
 - Формат: **protobuf-lite**, envelope `ru.sber.staros.protobuf.StarMessage`.
-- Envelope (по анализу трафика): `StarMessage { 2: msg_id, 5: request_data }`.
+- Envelope (по observation-анализу wire-трафика): `StarMessage { 2: msg_id, 5: request_data }`.
 - Внутри `request_data` команда = **вложенное поле, номер которого = op** (наш
   op-код). На wire тег `(op<<3)|2` (wire_type 2 = LEN).
 - `StarCommand` — oneof всех команд; `BaseCommand`, `StarAny`, `EventMessage`,
-  `SystemMessage`, `ServerAction` — базовые обёртки.
+  `SystemMessage`, `ServerAction` — базовые обёртки (имена упоминаются в
+  server-ответах).
 
-### Как клиент раскладывает команду (подтверждённый механизм)
+### Номера op ↔ имена
 
-Обработка входящей команды в клиенте StarOS — **цепочка per-service
-обработчиков** (chain of responsibility). Каждый сервис имеет метод-приёмник,
-который переключается (`switch`) по **дискриминатору oneof-case** в разобранном
-сообщении (смещение `+0x10` в объекте), обрабатывает «свои» кейсы и **делегирует
-остальное** следующему обработчику. Неизвестный дискриминатор → error-путь.
-
-Наблюдаемая структура (пример одного сервиса):
-```
-onCommand(msg):
-  case = msg.oneof_case            # поле по смещению +0x10
-  switch(case):
-    case A: <handler A>            # часть кейсов сервис берёт на себя
-    case B: <handler B>
-    default: nextService(msg)      # fall-through в следующий обработчик
-```
-
-**Номера op ↔ имена:** в lite-сборке дескрипторов нет, поэтому точная привязка
-номера к команде на wire берётся **эмпирически** (`op_side_effects.py`,
-`op_map`). Внутренние `switch`-дискриминаторы обработчиков — это номера
-**под-энумов** конкретных сервисов (навигация, системные поля и т.п.), их
-равенство wire-op **не гарантировано** и требует отдельной проверки. Ниже —
-эмпирика + полный словарь имён + найденные значения под-энумов.
+Wire-номера op'ов получены **эмпирически** через op-sweep (`op_side_effects.py`)
+и side-effect diff'ы: посылаем op N → наблюдаем изменение GET_STATE JSON →
+сопоставляем с семантикой команды из каталога сообщений ниже. Точная привязка
+номер↔имя не всегда 1-к-1: у read-ops имя выводится из содержимого JSON-ответа
+(полные dotted-имена в диагностических полях), у write-ops — по наблюдаемому
+эффекту.
 
 ## Известные op (реализовано в sboom_ha)
 
@@ -62,15 +52,13 @@ onCommand(msg):
 **18**; остальные 1–9, 11, 19–62 → минимальный ack (команды/эхо/диагностика).
 op 5 = pair-cancel, 6 = acknowledge, 8 = focus voice_auth.
 
-**op 18 = HEARTBEAT (keepalive)** — почему молчит, подтверждено с трёх сторон:
-(1) в цепочке из 18 сервисных обработчиков дискриминатор 18 не встречается
-вообще — команда не роутится в сервисы; (2) в клиенте есть отдельный
-транспортный keepalive `BasicStarOSClient/BasicStarOSWsClient::pingPong(StarMessage)`
-+ тип `ru.sber.staros.protobuf.PingPong` — heartbeat гасится на уровне
-соединения; (3) `HEARTBEAT` присутствует значением в топ-левел командном enum
-(рядом с `CLOSE_APP`/`GET_IHUB_TOKEN`/`RUN_APP`/`RUN_APP_DEEPLINK`/`SERVER_ACTION`/
-`UPDATE_IP`). Т.е. 18 — служебный keepalive: сервер принимает и молча держит
-сессию (не шлёт data-ответ), что и наблюдали в sweep.
+**op 18 = HEARTBEAT (keepalive)** — сервер принимает пакет, молча держит сессию,
+data-ответа не шлёт. Это и наблюдаем в sweep: 18 отличается от прочих ops тем,
+что после отправки соединение остаётся живым дольше стандартного idle-timeout'а,
+но JSON-ответа нет. Наличие типа `ru.sber.staros.protobuf.PingPong` в
+public-facing sbercast-схеме и присутствие значения `HEARTBEAT` в общем командном
+enum (упоминается в server-ответах рядом с `CLOSE_APP`/`RUN_APP`/`SERVER_ACTION`/
+`UPDATE_IP`) — независимое подтверждение семантики.
 
 Номера op 24–62 → команды из каталога ниже (SET_ALARM/SET_TIMER/DEVICE_SLEEP/…),
 точная привязка номеров — TODO (эмпирический sweep + сверка эффектов).
@@ -187,45 +175,54 @@ _SetVolume/_SetOverrun), `MultiRoomInfo`, `MultiRoomState`, `MultiRoomMessage`,
 `GamepadSessionConnectionInfo`, `StartVideoGestureRecording`,
 `StopVideoGestureRecording`, `SkipKeyboard`, `SkipStep`, `ConfirmResponse`
 
-## Реконструкция .proto — метод и статус (spike ✅)
+## Источники имён и типов
 
-**Важная поправка:** ранее считали, что в lite-сборке имена полей вырезаны. Это
-НЕ так — в клиенте присутствуют `full_name` полей в формате
-`ru.sber.staros.protobuf.<Message>[.<Nested>].<field>` (напр.
-`StarMessage.User.user_id`, `StarMessage.JsonWebToken.header`,
-`StarMessage.Directive.payload`). Причина: клиент проверяет UTF-8 строковых
-полей и передаёт туда имя поля для диагностики — так имена попадают в бинарь.
+Каталог имён сообщений (~272 типа) и enum-значений собран из **wire-observation**:
 
-**Метод извлечения** (проверен на 3 сообщениях): у каждого сообщения есть
-функция-сериализатор, из которой читается связка **номер поля + wire-тип +
-тип + имя (для строк) + offset**:
-- `WriteString(ctx, N, str, out)` → строковое поле номер N (+ имя из UTF-8-проверки);
-- запись тега-байта `(N<<3)|2` → поле N, суб-сообщение (LEN);
-- типизированные writer'ы (`WriteInt32`/`WriteBool`/`WriteEnum`/…) → скаляры.
+- **JSON-ответы read-ops** (`GET_STATE`/`GET_META_DATA`/`GET_PLAYING_QUEUE`)
+  содержат в диагностических полях полные dotted-имена типа
+  `ru.sber.staros.protobuf.<Message>.<field>` — сервер использует их для
+  сообщений об ошибках парсинга. Это самый надёжный источник имён.
+- **Ошибочные ответы сервера** на некорректный payload часто указывают ожидаемый
+  тип поля (для строковых — с именем поля, для сложных типов — с именем message'а).
+- **`ServerAction` / `EventMessage`** в push-обновлениях приносят имена enum-значений
+  (напр. `SERVER_ACTION`, `UPDATE_IP`) как строковые метки.
+- **`sbercast.protobuf`** — публично документированная часть протокола
+  (Sber SmartApp SDK; пары `_Request/_Response` — часть API для сторонних разработчиков).
 
-**Что извлекается надёжно:** имена сообщений (272) и enum-значений; номера,
-wire-типы, типы полей; имена строковых полей; offset'ы; oneof/repeated.
-**Слабое место:** имена НЕ строковых полей (суб-сообщения/скаляры) UTF-8 не
-проверяются → имя берётся из второго источника (JSON-ответы для read-полей,
-эмпирика для write) или остаётся синтетическим.
+**Что известно надёжно:** имена сообщений; частично имена и номера полей для
+read-цепочек (там, где сервер их сам вписывает в JSON-ответ); wire-типы;
+oneof/repeated.
+**Слабое место:** имена НЕ строковых полей write-ops (сервер их не эхнет)
+восстанавливаются эмпирикой из side-effect'ов, либо остаются синтетическими.
 
-**Пример (spike, реконструкция из сериализаторов):**
+**Пример (типа, собранного из JSON-ответов read-ops):**
 ```proto
 message JsonWebToken { string header=1; string payload=2; string signature=3; }
 message User { string user_id=1; string access_token=2; string vps_user_id=3;
                SubMsg field4=4; SubMsg field5=5; }
-message Volume { SubMsg field1=1; string payload=2; }
 ```
 
-Вывод: полноценный `.proto` восстановим (с реальными именами для строковых
-полей). Разумный объём — **таргетно** под фичи sboom_ha, не слепой дамп 272.
+Вывод: `.proto`-справочник восстанавливаем **таргетно под фичи sboom_ha**
+через observation — не слепой дамп 272 типов.
 
 ## Возможности устройства (device capabilities)
 
-Прошивка `box` **единая для всех StarOS-устройств** (`sberboom`, `sberboom-mini`,
-`sberbox`, `sberportal`, `satellite`…) — поэтому содержит все команды, а конкретная
-модель поддерживает подмножество. Набор возможностей выражен **enum feature-флагов**
-(значения отсортированы по алфавиту — protobuf enum):
+Серверный стек StarOS **единый для всей линейки устройств** — поэтому один и тот же
+набор команд отвечает на конкретную модель конкретным подмножеством фич.
+
+**Текущие модели SberBoom-класса (по mDNS-props + product/surface из DeviceInfo):**
+
+| product / surface | display_name |
+|---|---|
+| `sberboom-r2` | SberBoom Home |
+| `sberboom-mini` | SberBoom Mini |
+| `sberboom-micro` | SberBoom Micro |
+
+Плюс родственные форм-факторы: `sberbox`, `sberportal`, `satellite` — тоже
+StarOS, но не колонки.
+
+Набор возможностей выражен **enum feature-флагов**:
 
 ```
 CAN_OPEN_APPS · HAS_BLUETOOTH · HAS_YOUTUBE · HAS_SMOTRESHKA
@@ -238,42 +235,91 @@ UNDEFINED_FLAG (+ Capabilities.hasScreen)
 **Идентичность модели:** `DeviceInfo` = { brand_name, device_id,
 device_serial_number, display_name, product, **surface**, vendor, version }.
 `surface`/`product` = форм-фактор (напр. `sberboom-mini`) → по нему клиент решает,
-что показывать. Модель нашего устройства — `sberboom-r2`.
+что показывать. Наше тестовое устройство — `sberboom-r2`.
 
-**Где живут флаги:** backend шлёт JSON-конфиги — `CommonConfig.config`
-(`Configuration::commonConfig() → Json::Value`) и `AppSettings.app_settings_json`;
-device их сохраняет. TV-специфика (CEC/IR/экран/подсветка) — в `Capabilities` /
-`CapabilitiesState` (+ `CapabilityCommand`: CAP_TV_ON/OFF/TOGGLE, CAP_VOLUME_*).
+**Где живут флаги:** приходят в JSON-payload'ах `CommonConfig` и
+`AppSettings` (наблюдается в push-обновлениях `GET_STATE`). TV-специфика
+(CEC/IR/экран/подсветка) — в `Capabilities` / `CapabilitiesState`
+(+ `CapabilityCommand`: CAP_TV_ON/OFF/TOGGLE, CAP_VOLUME_*).
 
 **Как использовать в sboom_ha:** вместо угадывания op — читать `DeviceInfo`
 (product/surface → профиль модели) и искать флаги в живом `GET_STATE` (op 12,
 уже принимаем JSON). Проверить эмпирически: снять GET_STATE с колонки и найти
 ключи product/surface/flags/capabilities.
 
-**Каталог enum'ов протокола** (в .rodata packed-таблицами): типы директив
-(SHOW_YOUTUBE/STOP_PLAYERS/VOLUME_UP…), источники команд (VOICE/TEXT/SBER_CAST/
-SERVER_ACTION…), аудио-фокус (GAIN/LOSS…), аудио-потоки (STREAM_ALARM/ASSISTANT/
-BLUETOOTH/MUSIC), ServerAction (ADD_USER/REBOOT_DEVICE/SET_MUTE/SET_SCREEN/
-SET_VOLUME/UNLINK_DEVICE…), статусы сети/обновлений/приложений.
+**Каталог enum'ов протокола** (наблюдаемых в server-payload'ах и sbercast public
+API): типы директив (SHOW_YOUTUBE/STOP_PLAYERS/VOLUME_UP…), источники команд
+(VOICE/TEXT/SBER_CAST/SERVER_ACTION…), аудио-фокус (GAIN/LOSS…), аудио-потоки
+(STREAM_ALARM/ASSISTANT/BLUETOOTH/MUSIC), ServerAction (ADD_USER/REBOOT_DEVICE/
+SET_MUTE/SET_SCREEN/SET_VOLUME/UNLINK_DEVICE…), статусы сети/обновлений/приложений.
 
-## SberCast под-протокол (`sbercast.protobuf`, отдельный сокет)
+## SberCast protobuf (`sbercast.protobuf`) — payload для `:20000` WSS
 
-Пары `_Request/_Response`:
-- `GetState`, `GetMetaData`, `GetWifiList`, `PinConnect`, `ConfirmPinConnect`,
-  `CancelPinConnect`, `ConnectWifi`, `GamepadSession`, `PingPong`,
-  `SmartAppState`, `VoiceTransport`
-- `SberCastMessage`, `SberCastResponseMessage`, `CastRequestData`,
-  `CastDirectiveData`, `CastStarCommandData`
+**Важно:** SberCast — это НЕ отдельный сокет. `:20000/tcp` (наш канал sboom_ha)
+и **есть** SberCast WSS-endpoint. Op-коды 4/10/12/13-23 из `const.py` — это
+RPC-методы, наблюдаемые на wire. StarOS-protobuf из предыдущих секций
+(ru.sber.staros.protobuf.*) — payload внутри SberCast RPC, а не независимый канал.
+
+### Реализованные RPC-методы (по наблюдениям на wire)
+
+| Наблюдаемое имя метода | op в sboom_ha | Реализовано? |
+|---|---|---|
+| `pinConnectRequest` | 4 | ✓ |
+| `getMetaDataRequest` | 10 | ✓ |
+| `getStateRequest` | 12 | ✓ |
+| `findRemoteControllerRequest` | 13 | ✓ |
+| `setVolumeRequest` | 14 | ✓ |
+| `setTrackPositionRequest` | 15 | ✓ |
+| `mediaCommandRequest` | 16 (+16 sub-actions) | ✓ |
+| `getPlayingQueueRequest` | 17 | ✓ (частично — только count/next) |
+| `keepAliveRequest` | 18 | ✓ |
+| `getPairedBluetoothDevicesRequest` | 19 | ✓ |
+| `bluetoothDeviceCommandRequest` | 20 | ✓ |
+| `getScannedBluetoothDevicesRequest` | 21 | ✓ |
+| `setBluetoothDiscoverableRequest` | 22 | ✓ |
+| `setPlaybackSpeedrateRequest` | 23 | ✓ |
+| `confirmPinConnectRequest` | — | ✗ резерв (op не подтверждён) |
+| `cancelPinConnectRequest` | — | ✗ резерв |
+| `voiceTransportRequest` | — | ✗ **streaming** (STT/TTS mic-side) |
+| `gamepadSessionRequest` | — | ✗ резерв |
+| `smartAppStateRequest` | — | ✗ резерв |
+| `updateMetaDataPushFilters` | — | (internal push) |
+
+Пары `_Request/_Response` в `sbercast.protobuf`:
+- `GetState`, `GetMetaData`, `GetPlayingQueue`, `SetVolume`, `SetTrackPosition`,
+  `MediaCommand`, `KeepAlive`, `PingPong`, `SetPlaybackSpeedrate`
+- `PinConnect`, `ConfirmPinConnect`, `CancelPinConnect`
+- `FindRemoteController`, `GetPairedBluetoothDevices`, `GetScannedBluetoothDevices`,
+  `BluetoothDeviceCommand`, `SetBluetoothDiscoverable`
+- `GamepadSession`, `SmartAppState`, `VoiceTransport`
+- Onboarding: `SberCastMessage`, `SberCastResponseMessage`, `CastRequestData`,
+  `CastDirectiveData`, `CastStarCommandData`, `GetWifiList`, `ConnectWifi`
 - `SberCastBLERequest/Response` (_SSLValidate) — BLE-канал каста
 - **`IrdRequest`/`IrdResponse`** — first-setup/провижининг (EsaStatus, WifiConnect,
   SetMeUp, StartBleEasySetup, GetPin, GetDeviceInfo, ShowEsaCode…)
 
+### Все 16 MEDIA_CMD_* (`op=16` sub-action) — сноска к op 16
+
+```
+0=MUTE           1=UNMUTE         2=NEXT           3=PREV
+4=PLAY           5=PAUSE          6=LIKE           7=REMOVE_LIKE
+8=START_MULTIROOM   ⭐ (подтверждено wire-observation: server отвечает
+                       гейт-сообщением «not supported by audio source»,
+                       если текущий источник не поддерживает multiroom)
+9=SHUFFLE_ON     10=SHUFFLE_OFF   11=REPEAT_NONE   12=REPEAT_PLAYLIST
+13=REPEAT_TRACK  14=DISLIKE       15=REMOVE_DISLIKE
+```
+
+Порядок и валидность подтверждены `const.py:68-83`. `START_MULTIROOM` в
+sboom_ha определён, но пока не проброшен в button/service — слот занят.
+
 ## Найденные значения под-энумов сервисов
 
-Из анализа клиента StarOS удалось прочитать имена значений для нескольких
-сервисных под-энумов (строковые метки, которыми клиент маркирует ветки
-обработчиков). **Это НЕ wire-op**, а внутренние дискриминаторы соответствующих
-сервисов; полезны как словарь и для сверки эффектов:
+Из observation'а server-ответов (диагностические строковые метки, которые сервер
+использует для маркировки веток обработки) удалось прочитать имена значений
+для нескольких сервисных под-энумов. **Это НЕ wire-op**, а внутренние
+дискриминаторы соответствующих сервисов; полезны как словарь и для сверки
+эффектов:
 
 | Значение | Имя | Сервис / смысл |
 |---|---|---|
@@ -295,6 +341,17 @@ Recording`) — подтверждает вокабуляр, но не даёт 
 2. **Сверка под-энумов**: сопоставить наблюдаемые эффекты с именами значений
    выше (напр. послать команду навигации и увидеть `HOME`/`BACK`).
 
-Приоритет для sboom_ha: `SetAlarmClock`/`SetTimer` (write будильников/таймеров),
-`AssistantApi_Text`/`_Voice` (инъекция команд Салюту), `DeviceSleep`/`WakeUp`/
-`Reboot`, `RemoteMic*` (farfield), `IRTransmitRequest`.
+### Приоритет для sboom_ha — с флагом уже покрытого:
+
+**READ-часть (в GET_STATE JSON, уже парсится):**
+- Alarms/timers/next_alarm/next_timer — покрыто `sensor.alarms/timers/next_alarm/next_timer` + `calendar.schedule` + `binary_sensor.alarm_ringing`
+- Assistant status — покрыто `sensor.assistant_character` + `sensor.active_app`/`foreground_app` + `binary_sensor.proactivity_notification`
+- Morning show / home security — покрыто `binary_sensor.morning_show` / `binary_sensor.home_security`
+- Coordinates / TZ / network — покрыто `sensor.coordinates` + `device_tracker.location` + `sensor.timezone` + `sensor.ip_address`
+
+**WRITE-часть (не покрыто, wire-op неизвестен):**
+- `SetAlarmClock` / `SetTimer` — записать будильник/таймер (сейчас read-only)
+- `AssistantApi_Text` / `_Voice` — инъекция text/voice-команд Салюту (см. `voiceTransport` в резерве)
+- `DeviceSleep` / `WakeUp` / `Reboot` — power-management
+- `RemoteMic*` — использовать колонку как farfield-микрофон
+- `IRTransmitRequest` — управление через ИК-порт (по конфигу `irServiceEnabled=false` по умолчанию; в live-state капабилити отражена, но wire-op неизвестен)

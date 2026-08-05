@@ -29,7 +29,7 @@
 ### Панель управления (боковое меню «SberBoom»)
 Встроенная премиум-панель плеера — immersive-карточка с обложкой во весь фон и фрост-стеклом; оформление на **нативных токенах темы Home Assistant** (адаптируется к светлой/тёмной/кастомной теме):
 - 🎨 **Ambient-свечение из цвета обложки** — интерфейс «носит» цвет того, что играет (эхо LED-кольца колонки); на простое схлопывается, уважает `prefers-reduced-motion`
-- 🎛 Транспорт (play/pause/next/prev/shuffle/repeat), **лайк/дизлайк**, **скорость воспроизведения** (0.75×–2×), **найти пульт**, громкость с mute
+- 🎛 Транспорт (play/pause/next/prev/shuffle/repeat), **лайк/дизлайк**, **скорость воспроизведения** (0.5×–2.0×), **найти пульт**, громкость с mute
 - 🧭 **Единый drill-down браузер без табов**: очередь → поиск → **артист** (аватар, топ-треки, дискография) → **альбом** (треклист) → трек. Кнопка «назад», персистентный поиск
 - 🔎 **Богатый поиск Sber Звук** — секции **Исполнители / Альбомы / Треки / Плейлисты** с обложками; клик запускает воспроизведение на колонке
 - 🔊 **Несколько колонок** — селектор устройства в шапке карточки
@@ -38,7 +38,7 @@
 
 > 🃏 **Та же панель как карточка дашборда** — **[ha-sboom-card](https://github.com/dzerik/ha-sboom-card)**: standalone immersive Lovelace-карточка (тот же вид: обложка-фон, фрост-стекло, ambient-glow, idle-сворачивание, drill-down каталог). Ставится через HACS, переиспользует компоненты этой интеграции. Работает даже при выключенной боковой панели.
 
-### Сервис `sboom.play_music`
+### Сервис `sboom_ha.play_music`
 Запуск контента на колонке по:
 - ссылке `zvuk.com` (напр. `https://zvuk.com/track/84279897`),
 - поисковому запросу (`query: "Егор Летов"`),
@@ -268,6 +268,7 @@ action:
 | `sboom_ha.refresh_metadata` | Force-fetch текущего трека/состояния (без ожидания poll-цикла) |
 | `sboom_ha.reauth` | Запустить переавторизацию (нужно нажать `+` на колонке после вызова) |
 | `sboom_ha.bluetooth_device` | Подключить / отключить / удалить спаренное BT-устройство по MAC |
+| `sboom_ha.play_music` | Запустить контент на колонке по ссылке `zvuk.com`, поисковому запросу (`query`), либо паре `id` + `kind` (`track` / `artist` / `release` / `playlist` / `podcast` / `abook`) |
 
 Все сервисы поддерживают `target.device_id`; невалидные вызовы и вызовы без загруженных колонок падают с понятной ошибкой (`ServiceValidationError`), а не игнорируются молча.
 
@@ -303,8 +304,23 @@ Brand-ассеты лежат прямо внутри интеграции: `cus
 
 - `websockets >= 13.0` — WebSocket-клиент
 - `Pillow >= 10.0` — рендер lyrics-кадров для camera entity (≈10 MB)
+- `httpx >= 0.27` — HTTP-клиент для lyrics-провайдеров (Lrclib.net + NetEase) и Zvuk-каталога
 
-Lyrics загружаются цепочкой источников: [Lrclib.net](https://lrclib.net/) → NetEase Cloud Music (резерв, отключается в Options) — оба public API, без авторизации и ключей. Приоритет у synced-текста: plain-only результат Lrclib уступает synced-тексту NetEase.
+### Внешние источники данных
+
+Интеграция полностью локальна в части управления колонкой, но подтягивает
+метаданные из открытых источников (все — без авторизации, без ключей, без
+регистрации; вызываются HA-сервером, не колонкой):
+
+| Источник | Что берётся | Когда |
+|---|---|---|
+| **[Lrclib.net](https://lrclib.net/)** | synced lyrics (`.lrc`) | primary lyrics для музыки с известным `track_id` и Bluetooth |
+| **NetEase Cloud Music** (`music.163.com`) | synced lyrics (`.lrc`) | fallback lyrics, если Lrclib не нашёл; отключается в Options |
+| **[iTunes Search API](https://itunes.apple.com/search)** | обложка альбома | Bluetooth / радио (когда нет `track_id` из каталога Zvuk) |
+| **[Deezer public API](https://api.deezer.com/search)** | обложка альбома | fallback после iTunes, тот же кейс |
+| **Zvuk каталог + CDN** (`zvuk.com`, `cdn-image.zvuk.com`) | треки/альбомы/артисты/плейлисты для панели-браузера и сервиса `play_music`; обложки каталожных треков | drill-down браузер боковой панели + сервис `sboom_ha.play_music` + обложка для media_player, когда колонка играет из Zvuk |
+
+Если ни один источник обложки не отдал результат — выводится **свободный (CC0) градиент**, стабильно-случайный по треку (см. `image_render.fallback_cover`).
 
 ## Известные ограничения
 
@@ -480,4 +496,10 @@ MIT, см. [LICENSE](LICENSE).
 ## Полезные ссылки
 [Telegram](https://t.me/+k_w9uO0h73FkNjJi) c обсуждением этой и других интеграций
 
-Lyrics предоставлены [Lrclib.net](https://lrclib.net/) — open-source community-проект, без аффилиации с Sber.
+### Атрибуция внешних источников данных
+
+- **Lyrics**: [Lrclib.net](https://lrclib.net/) (primary) — open-source community-проект — и [NetEase Cloud Music](https://music.163.com/) public search/lyric API (fallback). Оба сервиса не аффилированы с Sber.
+- **Обложки Bluetooth/радио**: [iTunes Search API](https://itunes.apple.com/search) → fallback [Deezer public API](https://api.deezer.com/search). Без авторизации.
+- **Zvuk-каталог и обложки** для боковой панели-браузера и сервиса `sboom_ha.play_music`: публичное HTTP API `zvuk.com` + CDN `cdn-image.zvuk.com`. Аналогично тому, как их использует веб-плеер `zvuk.com` в браузере.
+
+Ни один источник не требует авторизации, ключей или регистрации.
