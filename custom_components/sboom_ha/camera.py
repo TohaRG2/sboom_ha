@@ -180,7 +180,6 @@ class SboomLyricsCamera(SboomEntity, Camera):
             return
         timeline = lyrics.timeline
         cover_raw = await self._fetch_cover_raw(track)
-        artist = ", ".join(track.artists) if track.artists else None
         last_key: tuple | None = None
         last_pos: float | None = None
 
@@ -190,6 +189,9 @@ class SboomLyricsCamera(SboomEntity, Camera):
             and self.coordinator.current_lyrics() is lyrics
         ):
             track = self.coordinator.track
+            # title/artist/source берём свежими на каждый кадр: для BT/радио track_id
+            # не меняется, а метаданные — да.
+            artist = ", ".join(track.artists) if track.artists else None
             pos = lyrics_position(self.coordinator)
             if pos is None:
                 await asyncio.sleep(1)
