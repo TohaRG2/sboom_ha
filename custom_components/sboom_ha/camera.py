@@ -232,7 +232,9 @@ class SboomLyricsCamera(SboomEntity, Camera):
         """Нет synced lyrics — обновляем кадр каждую секунду (для движения прогресс-бара)."""
         track = self.coordinator.track
         track_id = track.track_id if track else None
-        last_sec: int | None = None
+        # Sentinel вместо None: у BT-трека позиции нет (cur_sec=None), и
+        # сравнение None==None не отрисовало бы ни одного кадра.
+        last_sec: object = object()
         while (
             self.coordinator.track
             and self.coordinator.track.track_id == track_id

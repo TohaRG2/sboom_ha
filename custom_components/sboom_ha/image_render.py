@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import os
-import re
+import textwrap
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -42,8 +42,12 @@ def _layout_text(
     многострочных текстах). Логика уменьшения шрифта при переполнении —
     исторически из _draw_text.
     """
-    lines = re.findall(rf"(.{{1,{line_width}}})(?:\s|$)", text)
-    if (font_size > 70 and len(lines) > 3) or (font_size <= 70 and len(lines) > 4):
+    # break_long_words: текст без пробелов (CJK-лирика, длинные слова)
+    # режется по ширине, а не отбрасывается.
+    lines = textwrap.wrap(text, width=line_width, break_long_words=True) or [""]
+    overflow = (font_size > 70 and len(lines) > 3) or (font_size <= 70 and len(lines) > 4)
+    # Нижняя граница рекурсии: шрифт не уходит в ≤0 (ValueError из PIL).
+    if overflow and font_size - 10 >= 12:
         return _layout_text(text, box, anchor, font_size - 10, line_width + 3)
 
     if anchor[0] == "l":

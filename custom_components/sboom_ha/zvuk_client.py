@@ -79,6 +79,8 @@ _URL_KIND_MAP: dict[str, tuple[str, str]] = {
     "release": ("release", "pid"),  # TODO: pt=release для альбома не подтверждён
     "playlist": ("playlist", "pid"),
     "abook": ("podcast", "tid"),
+    # kind сервиса play_music (в URL zvuk.com такого сегмента нет).
+    "podcast": ("podcast", "tid"),
 }
 _URL_RE = re.compile(
     r"zvuk\.com/(track|artist|release|playlist|abook)/(\d+)", re.IGNORECASE
@@ -188,12 +190,21 @@ class ZvukClient:
     async def _graphql(
         self, query: str, variables: dict[str, Any]
     ) -> dict[str, Any]:
-        """Выполнить GraphQL-запрос с X-Auth-Token. Вернуть блок `data`."""
+        """Выполнить GraphQL-запрос с X-Auth-Token. Вернуть блок `data`.
+
+        401 (протух кэшированный анонимный токен) → один retry со свежим
+        токеном; без этого поиск был бы мёртв до рестарта HA.
+        """
         token = await self.get_token()
         payload = {"query": query, "variables": variables}
         resp = await self._http().post(
             GRAPHQL_URL, json=payload, headers={"X-Auth-Token": token}
         )
+        if resp.status_code == 401:
+            token = await self.get_token(force=True)
+            resp = await self._http().post(
+                GRAPHQL_URL, json=payload, headers={"X-Auth-Token": token}
+            )
         resp.raise_for_status()
         body = resp.json()
         if body.get("errors"):
@@ -434,6 +445,14 @@ class ZvukClient:
                 params={"query": query, "type": types, "limit": limit},
                 headers={"X-Auth-Token": token},
             )
+            if resp.status_code == 401:
+                # Протух анонимный токен → один retry со свежим (см. _graphql).
+                token = await self.get_token(force=True)
+                resp = await self._http().get(
+                    SEARCH_URL,
+                    params={"query": query, "type": types, "limit": limit},
+                    headers={"X-Auth-Token": token},
+                )
             resp.raise_for_status()
             search = ((resp.json() or {}).get("result") or {}).get("search") or {}
         except (httpx.HTTPError, ValueError, TypeError) as exc:

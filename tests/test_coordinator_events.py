@@ -244,3 +244,82 @@ def test_set_connected_fires_event_when_not_stopping():
     [payload] = _fire(coord, EVENT_CONNECTION_CHANGED)
     assert payload["connected"] is False
     assert getattr(coord, "_listener_calls", 0) == listeners_before + 1
+
+
+# ────────────────── push GET_STATE → now-playing BT/радио (аудит #7) ──────
+
+
+def _bt_state_raw(title: str, playing: bool = True) -> bytes:
+    import json as _json
+
+    return _json.dumps({
+        "background_apps": [
+            {
+                "app_info": {"systemName": "bluetooth_media_control"},
+                "state": {
+                    "player": {
+                        "playing": playing,
+                        "duration": 0,
+                        "info": {
+                            "title": title,
+                            "artists": [{"name": "BT Artist"}],
+                            "provider": "bluetooth",
+                        },
+                    }
+                },
+            }
+        ],
+        "volume": {"percent": 30, "muted": False},
+    }).encode()
+
+
+@pytest.mark.asyncio
+async def test_state_push_rebuilds_bt_track_immediately():
+    """Смена песни по Bluetooth приходит push'ем GET_STATE — title/artist
+    должны обновиться сразу, а не через 15-секундный volume-poll."""
+    from sboom_ha.const import ENVELOPE_FIELD_REQUEST_DATA
+
+    old = make_track(
+        title="Old BT Song", track_id=None, provider=None,
+        release_id=None, artist_ids=[], position_sec=None, duration_sec=None,
+    )
+    coord = build_coordinator(track=old, state=make_state())
+    raw = _bt_state_raw("New BT Song")
+    await coord._handle_event(raw, {ENVELOPE_FIELD_REQUEST_DATA: {OP_GET_STATE: b""}})
+    assert coord.track is not None
+    assert coord.track.title == "New BT Song"
+    assert coord.track.media_source == "BLUETOOTH"
+
+
+@pytest.mark.asyncio
+async def test_state_push_does_not_clobber_catalog_track():
+    """Каталожный трек (track_id есть) не затирается state-производным —
+    метаданные каталога приходят отдельным push'ем OP_GET_META_DATA."""
+    from sboom_ha.const import ENVELOPE_FIELD_REQUEST_DATA
+
+    catalog = make_track(title="Catalog Song", track_id="1001")
+    coord = build_coordinator(track=catalog, state=make_state())
+    raw = _bt_state_raw("Stray BT Info", playing=False)
+    await coord._handle_event(raw, {ENVELOPE_FIELD_REQUEST_DATA: {OP_GET_STATE: b""}})
+    assert coord.track.title == "Catalog Song"
+    assert coord.track.track_id == "1001"
+
+
+# ────────────────── единый device_id с fallback на host (аудит #4) ────────
+
+
+def test_event_device_id_falls_back_to_host_for_manual_entry():
+    """Manual flow (без zeroconf): CONF_DEVICE_ID пуст. События обязаны нести
+    тот же fallback (host), что и identifiers устройства в _entity_base —
+    иначе device-триггеры подписаны на host, а события несут None и триггеры
+    молча мертвы."""
+    from tests._fakes import make_entry
+
+    coord = build_coordinator(
+        entry=make_entry(device_id=None), track=make_track(track_id="A"),
+    )
+    coord.hass.bus.fired.clear()
+    coord.track = make_track(track_id="B")
+    coord._fire_change_events(prev_track=make_track(track_id="A"), prev_state=None)
+    [payload] = [d for et, d in coord.hass.bus.fired if et == EVENT_TRACK_CHANGED]
+    assert payload["device_id"] == "192.0.2.10"

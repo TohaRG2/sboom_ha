@@ -91,8 +91,14 @@ def _get_zvuk_client(hass: HomeAssistant) -> ZvukClient:
 # ─────────────────────────── сериализация ─────────────────────────────────
 
 
-def _serialize_track(track: TrackInfo | None) -> dict[str, Any] | None:
-    """TrackInfo → JSON-safe dict для панели (плоский now-playing)."""
+def _serialize_track(
+    track: TrackInfo | None, fallback_cover: str | None = None
+) -> dict[str, Any] | None:
+    """TrackInfo → JSON-safe dict для панели (плоский now-playing).
+
+    fallback_cover — обложка, найденная по title+artist (BT/радио, у которых
+    нет каталожного id) — тот же фолбэк, что в media_player и camera.
+    """
     if track is None:
         return None
     return {
@@ -113,6 +119,11 @@ def _serialize_track(track: TrackInfo | None) -> dict[str, Any] | None:
         # снимок позиции + метка времени (unix ms) — панель крутит прогресс
         # локально от этой точки, как media_player.media_position_updated_at.
         "position_ts_ms": track.position_ts_ms,
+        # Часы HA в момент получения снимка: часы колонки (position_ts_ms)
+        # могут расходиться с реальностью — фронтенд предпочитает эту метку.
+        "received_ts_ms": (
+            int(track.received_ts * 1000) if track.received_ts else None
+        ),
         "playing": track.playing,
         "shuffle": track.shuffle,
         "repeat": track.repeat,
@@ -120,7 +131,7 @@ def _serialize_track(track: TrackInfo | None) -> dict[str, Any] | None:
         "liked": track.liked,
         "has_lyrics": track.has_lyrics,
         "playback_speed": track.playback_speed,
-        "cover_url": cover_url(track),
+        "cover_url": cover_url(track) or fallback_cover,
     }
 
 
@@ -145,7 +156,7 @@ def _state_payload(
         "connected": coordinator.connected,
         "version": hass.data.get(f"{DOMAIN}_version"),
         "state": _serialize_state(coordinator.state),
-        "track": _serialize_track(coordinator.track),
+        "track": _serialize_track(coordinator.track, coordinator.current_cover()),
     }
 
 

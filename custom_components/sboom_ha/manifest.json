@@ -22,7 +22,7 @@
     "Pillow>=10.0",
     "httpx>=0.27"
   ],
-  "version": "0.35.3",
+  "version": "0.35.4",
   "zeroconf": [
     {
       "type": "_staros._tcp.local."

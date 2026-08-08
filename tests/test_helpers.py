@@ -188,3 +188,21 @@ def test_track_position_paused_ignores_received_monotonic():
         received_monotonic=time.monotonic() - 60,
     )
     assert track_position(_Coord(track)) == 42
+
+
+def test_track_position_clamps_long_monotonic_gap_instead_of_dropping():
+    """Monotonic-штамп ставит HA — мусорным быть не может (аудит #13).
+
+    Раньше при дельте ≥ 600 c экстраполяция отбрасывалась целиком: на 601-й
+    секунде длинного трека позиция резко откатывалась к базе. Теперь дельта
+    клампится к капу.
+    """
+    track = _make_track(
+        playing=True,
+        position_sec=100,
+        duration_sec=3600,
+        received_monotonic=time.monotonic() - (_MAX_EXTRAPOLATION_SEC + 30),
+    )
+    pos = track_position(_Coord(track))
+    assert pos is not None
+    assert 100 + _MAX_EXTRAPOLATION_SEC - 2 <= pos <= 100 + _MAX_EXTRAPOLATION_SEC + 2

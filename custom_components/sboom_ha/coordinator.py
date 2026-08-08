@@ -23,7 +23,6 @@ from .cli4242 import Cli4242Client, MatterDevice, ZigbeeDevice
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_NAME,
-    CONF_DEVICE_ID,
     CONF_HOST,
     CONF_PIN_ACCESS_TOKEN,
     CONF_PORT,
@@ -51,6 +50,7 @@ from .const import (
     STABLE_SESSION_SEC,
 )
 from .cover_manager import CoverManager
+from .helpers import sber_device_id
 from .iio_client import IioCapability, IioClient, IioReading
 from .lyrics_client import Lyrics
 from .lyrics_manager import LyricsManager
@@ -414,6 +414,22 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             track.received_ts = time.time()
         return track
 
+    def _maybe_update_track_from_state(self) -> None:
+        """Пересобрать now-playing из свежего GET_STATE (push-путь).
+
+        Смена песни по Bluetooth/радио приходит push'ем GET_STATE (metadata-push
+        для них не бывает — нет trackId); без пересборки title/artist ждали бы
+        следующего volume-poll'а. Каталожный трек не затирается: его обновляет
+        OP_GET_META_DATA, state-производный принимается только если играет
+        (реальное переключение источника на BT/радио).
+        """
+        derived = self._track_from_current_state()
+        if derived is None or derived.track_id:
+            return
+        if self.track is None or not self.track.track_id or derived.playing:
+            self.track = self._stamp_track(derived)
+            self._maybe_fetch_lyrics()
+
     def _track_from_current_state(self) -> TrackInfo | None:
         """Now-playing из последнего GET_STATE (радио/Bluetooth — без trackId)."""
         if not self.state or not self.state.raw_state_json:
@@ -508,6 +524,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         prev_track = self.track
         prev_state = self.state
         changed = False
+        metadata_updated = False
         if OP_GET_META_DATA in req_data:    # MetaData update
             try:
                 new_track = self._stamp_track(self.client.parse_track(raw))
@@ -515,6 +532,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.track = new_track
                     self._maybe_fetch_lyrics()
                     changed = True
+                    metadata_updated = True
             except Exception:  # pragma: no cover
                 _LOGGER.exception("metadata push parse failed")
         if OP_GET_STATE in req_data:    # State update
@@ -533,6 +551,8 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     self.state = self._merge_state(new_state)
                     changed = True
+                    if not metadata_updated:
+                        self._maybe_update_track_from_state()
             except Exception:
                 _LOGGER.exception("state push parse failed")
         if changed:
@@ -606,10 +626,14 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def _event_payload_base(self) -> dict[str, Any]:
-        """Общая часть полезной нагрузки события: device-контекст."""
+        """Общая часть полезной нагрузки события: device-контекст.
+
+        device_id — через общий sber_device_id (fallback на host): тот же
+        идентификатор, что в identifiers устройства и фильтрах device-триггеров.
+        """
         return {
             "entry_id": self.entry.entry_id,
-            "device_id": self.entry.data.get(CONF_DEVICE_ID),
+            "device_id": sber_device_id(self.entry),
             "host": self.entry.data.get(CONF_HOST),
         }
 

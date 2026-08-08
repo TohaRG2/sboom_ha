@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SboomCoordinator
+from .helpers import sber_device_id
 
 
 class SboomEntity(CoordinatorEntity[SboomCoordinator]):
@@ -29,7 +30,7 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
         super().__init__(coordinator)
         self._entry = entry
         host = entry.data[CONF_HOST]
-        device_id = entry.data.get(CONF_DEVICE_ID) or host
+        device_id = sber_device_id(entry)
         self._device_unique_prefix = f"{DOMAIN}_{device_id}"
 
         # Полный набор полей DeviceInfo. None-поля HA проигнорирует, поэтому

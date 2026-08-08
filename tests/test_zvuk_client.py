@@ -351,3 +351,74 @@ async def test_dominant_cover_color_cache_bounded():
             )
         assert len(client._color_cache) <= _COLOR_CACHE_MAX
         await client.aclose()
+
+
+# ────────────────── 401 → retry с force-токеном (аудит #6) ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_graphql_retries_with_fresh_token_after_401():
+    """Протухший анонимный токен: один retry с get_token(force=True)."""
+    async with respx.mock:
+        profile = respx.get(PROFILE).mock(
+            side_effect=[
+                httpx.Response(200, json={"result": {"token": "OLD"}}),
+                httpx.Response(200, json={"result": {"token": "NEW"}}),
+            ]
+        )
+        gql = respx.post(GRAPHQL).mock(
+            side_effect=[
+                httpx.Response(401),
+                httpx.Response(200, json={"data": {"getTracks": [
+                    {"id": "1", "title": "T", "artists": [], "release": {}}
+                ]}}),
+            ]
+        )
+        client = ZvukClient()
+        tracks = await client.get_tracks(["1"])
+        await client.aclose()
+    assert len(tracks) == 1 and tracks[0]["title"] == "T"
+    assert profile.call_count == 2  # второй раз — force
+    assert gql.call_count == 2
+    assert gql.calls[1].request.headers["X-Auth-Token"] == "NEW"
+
+
+@pytest.mark.asyncio
+async def test_search_retries_with_fresh_token_after_401():
+    empty_search = {"result": {"search": {
+        "best_item": None,
+        "artists": {"items": []}, "releases": {"items": []},
+        "tracks": {"items": []}, "playlists": {"items": []},
+    }}}
+    async with respx.mock:
+        profile = respx.get(PROFILE).mock(
+            side_effect=[
+                httpx.Response(200, json={"result": {"token": "OLD"}}),
+                httpx.Response(200, json={"result": {"token": "NEW"}}),
+            ]
+        )
+        search = respx.get(SEARCH).mock(
+            side_effect=[
+                httpx.Response(401),
+                httpx.Response(200, json=empty_search),
+            ]
+        )
+        client = ZvukClient()
+        res = await client.search("Летов")
+        await client.aclose()
+    assert res["tracks"] == [] and res["best"] is None  # не «ошибка», а результат
+    assert profile.call_count == 2
+    assert search.call_count == 2
+    assert search.calls[1].request.headers["X-Auth-Token"] == "NEW"
+
+
+# ────────────────── kind=podcast (аудит #8) ─────────────────────────────────
+
+
+def test_parse_zvuk_url_bare_id_kind_podcast():
+    """Схема сервиса разрешает kind=podcast — маппинг обязан его знать."""
+    assert ZvukClient.parse_zvuk_url("55", kind="podcast") == (
+        "podcast",
+        "tid",
+        "55",
+    )
