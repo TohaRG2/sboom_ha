@@ -20,8 +20,8 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
@@ -40,19 +40,15 @@ _LOGGER = logging.getLogger(__name__)
 
 _ZVUK_CLIENT_KEY = f"{DOMAIN}_zvuk_client"
 
-# pt (playlist type) → в какое поле deeplink кладётся id.
-# tid — конкретный трек/подкаст-выпуск; pid — коллекция (артист/плейлист/релиз).
-_PT_TID = frozenset({"track", "podcast"})
+# Свободный deeplink из фронтенда уходит на колонку как есть — принимаем
+# только staros://-схему с безопасным набором символов (без пробелов/кавычек:
+# инъекция параметров и разрыв payload'а невозможны). Аудит #41.
+_DEEPLINK_RE = re.compile(r"^staros://[\w.~%/?&=:-]+$")
 
-# zvuk.com/{path}/<id> → pt (playlist type) для сборки deeplink.
-# release==album (pt=release — по фактам реверса, помечен как непроверенный).
-_ZVUK_URL_KIND_TO_PT = {
-    "track": "track",
-    "artist": "artist",
-    "release": "release",
-    "playlist": "playlist",
-    "abook": "podcast",
-}
+
+def _is_valid_deeplink(deeplink: str) -> bool:
+    """True, если строка — безопасный staros:// deeplink."""
+    return bool(_DEEPLINK_RE.match(deeplink))
 
 
 # ─────────────────────────── доступ к состоянию ───────────────────────────
@@ -136,31 +132,6 @@ def _serialize_state(state: SpeakerState | None) -> dict[str, Any] | None:
         "volume_percent": state.volume_percent,
         "muted": state.muted,
     }
-
-
-# ─────────────────────────── deeplink helpers ─────────────────────────────
-
-
-def _build_deeplink(pt: str, item_id: str) -> str:
-    """Собрать staros-deeplink из pt (playlist type) и id.
-
-    track/podcast → tid, всё остальное (artist/playlist/release) → pid.
-    """
-    key = "tid" if pt in _PT_TID else "pid"
-    return f"staros://music?{key}={item_id}&pt={pt}"
-
-
-def _deeplink_from_zvuk_url(url: str) -> str | None:
-    """zvuk.com/{track|artist|release|playlist|abook}/<id> → staros-deeplink."""
-    parsed = urlparse(url)
-    segments = [seg for seg in parsed.path.split("/") if seg]
-    if len(segments) < 2:
-        return None
-    kind, item_id = segments[-2], segments[-1]
-    pt = _ZVUK_URL_KIND_TO_PT.get(kind)
-    if pt is None or not item_id:
-        return None
-    return _build_deeplink(pt, item_id)
 
 
 # ─────────────────────────── команды ──────────────────────────────────────
@@ -362,13 +333,21 @@ async def ws_play(
         return
 
     deeplink: str | None = msg.get("deeplink")
+    if deeplink is not None and not _is_valid_deeplink(deeplink):
+        connection.send_error(
+            msg["id"], "invalid_args", "invalid deeplink"
+        )
+        return
     if deeplink is None and (url := msg.get("url")):
-        deeplink = _deeplink_from_zvuk_url(url)
-        if deeplink is None:
+        # Разбор/валидация zvuk-URL — единый источник в ZvukClient (хост
+        # zvuk.com, известный kind, числовой id).
+        parsed = ZvukClient.parse_zvuk_url(url)
+        if parsed is None:
             connection.send_error(
                 msg["id"], "invalid_args", f"Unrecognized url: {url}"
             )
             return
+        deeplink = ZvukClient.build_deeplink(*parsed)
     if deeplink is None and (item_id := msg.get("content_id")):
         pt = msg.get("pt") or msg.get("kind")
         if not pt:
@@ -376,7 +355,12 @@ async def ws_play(
                 msg["id"], "invalid_args", "id requires kind or pt"
             )
             return
-        deeplink = _build_deeplink(pt, item_id)
+        deeplink = ZvukClient.deeplink_for(pt, item_id)
+        if deeplink is None:
+            connection.send_error(
+                msg["id"], "invalid_args", f"invalid pt/id: {pt}/{item_id}"
+            )
+            return
     if deeplink is None:
         connection.send_error(
             msg["id"], "invalid_args", "one of deeplink/url/id is required"

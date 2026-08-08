@@ -1,42 +1,39 @@
 """Тесты helper'ов WebSocket API панели.
 
-Проверяем чистые функции сборки/разбора deeplink — контракт tid vs pid и
-разбор zvuk-URL, на который завязаны панель (sboom/play) и сервис play_music.
+Проверяем валидацию входов sboom/play — deeplink из фронтенда, zvuk-URL и
+пары pt+id идут на колонку только после проверки (SSRF/инъекции — аудит #41).
+Сборка deeplink делегируется ZvukClient (единый источник — аудит #17).
 Импорт модуля идёт через HA-стабы (conftest).
 """
 from __future__ import annotations
 
 import pytest
-from sboom_ha.websocket_api import _build_deeplink, _deeplink_from_zvuk_url
+from sboom_ha.websocket_api import _is_valid_deeplink
 
 
 @pytest.mark.parametrize(
-    ("pt", "item_id", "expected"),
+    "deeplink",
     [
-        ("track", "1", "staros://music?tid=1&pt=track"),
-        ("podcast", "2", "staros://music?tid=2&pt=podcast"),
-        ("artist", "3", "staros://music?pid=3&pt=artist"),
-        ("release", "4", "staros://music?pid=4&pt=release"),
-        ("playlist", "5", "staros://music?pid=5&pt=playlist"),
+        "staros://music?tid=84279897&pt=track",
+        "staros://music?pid=126769660&pt=artist",
+        "staros://radio?station=record",
     ],
 )
-def test_build_deeplink_tid_vs_pid(pt, item_id, expected):
-    assert _build_deeplink(pt, item_id) == expected
+def test_is_valid_deeplink_accepts_staros(deeplink):
+    assert _is_valid_deeplink(deeplink)
 
 
 @pytest.mark.parametrize(
-    ("url", "expected"),
+    "deeplink",
     [
-        ("https://zvuk.com/track/84279897", "staros://music?tid=84279897&pt=track"),
-        ("https://zvuk.com/artist/126769660", "staros://music?pid=126769660&pt=artist"),
-        ("https://zvuk.com/release/14359015", "staros://music?pid=14359015&pt=release"),
-        ("https://zvuk.com/abook/999", "staros://music?tid=999&pt=podcast"),
+        "https://evil.example/x",  # не staros
+        "javascript:alert(1)",
+        "staros://music?tid=1 2",  # пробел
+        'staros://music?tid="1"',  # кавычки
+        "staros://music?tid=1\n2",  # перевод строки
+        "",
+        "staros://",  # пустой остаток
     ],
 )
-def test_deeplink_from_zvuk_url(url, expected):
-    assert _deeplink_from_zvuk_url(url) == expected
-
-
-def test_deeplink_from_zvuk_url_invalid():
-    assert _deeplink_from_zvuk_url("https://zvuk.com/") is None
-    assert _deeplink_from_zvuk_url("https://example.com/unknown/1") is None
+def test_is_valid_deeplink_rejects_garbage(deeplink):
+    assert not _is_valid_deeplink(deeplink)

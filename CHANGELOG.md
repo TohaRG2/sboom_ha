@@ -6,7 +6,20 @@
 
 ## [Unreleased]
 
+## [0.35.3] — 2026-08-08
+
+Волна 1 исправлений по итогам конкурентного code review (`REVIEW_REPORT.md`): безопасность и приватность.
+
+### Security
+- **Диагностика больше не утекает PII (аудит #3, high).** В `diagnostics.TO_REDACT` добавлены `latitude`/`longitude`/`location_accuracy` (точные координаты дома), `network_ip`, `raw_state_json` и `raw` — раньше пользователь, прикладывая diagnostics к bug report, публиковал геолокацию своего дома: `async_redact_data` не заглядывает внутрь строковых значений.
+- **SSRF в `sboom/cover_color` закрыт (аудит #2).** `ZvukClient.dominant_cover_color` теперь скачивает только https-обложки с известных CDN (`*.zvuk.com`, `*.mzstatic.com`, `*.dzcdn.net`), проверяет конечный URL после редиректов, ограничивает тело 5 МБ (потоковое чтение) и держит кэш цветов в LRU-границе 256 записей. Раньше любой аутентифицированный пользователь HA мог заставить сервер слать GET во внутреннюю сеть и скармливать ответ Pillow.
+- **Валидация входов `sboom/play` (аудит #41).** Свободный `deeplink` принимается только по маске `staros://` с безопасным набором символов; пара `pt`+`content_id` идёт через новый `ZvukClient.deeplink_for` (whitelist pt, только числовой id — инъекция query-параметров невозможна); `url` разбирается `ZvukClient.parse_zvuk_url` (хост zvuk.com, числовой id).
+
+### Changed
+- **Deeplink-логика панели объединена с `ZvukClient` (аудит #17).** Дубли `_build_deeplink`/`_deeplink_from_zvuk_url`/`_ZVUK_URL_KIND_TO_PT` в `websocket_api.py` удалены; единственный источник маппинга kind→pt/tid|pid — `zvuk_client.py` (как уже делал `services.py`). Инлайн-дубль решения tid/pid в `search_first_deeplink` сведён к `deeplink_for`.
+
 ### Fixed
+- **Сетевые сбои не кэшируются в `dominant_cover_color` (аудит #38, попутно с #2).** Транзиентная ошибка сети больше не замораживает `color=None` до рестарта HA — инвариант «сетевая ошибка ≠ not_found» теперь соблюдён и здесь.
 - **`camera.<name>_lyrics_na_tv`: артист/заголовок теперь обновляются в караоке-стриме для Bluetooth и радио.** `artist` вычислялся один раз до while-loop и оставался frozen. Цикл живёт, пока `track_id` неизменен — а для BT/radio это `None` (либо stream-id) постоянно, при этом метаданные меняются с каждым треком. Итог: `track.title` брался свежий из `coordinator.track` и обновлялся, а `artist` застревал. Перенёс вычисление внутрь loop после `track = self.coordinator.track` (commit `4577285`).
 
 ### CI / Docs / Chores

@@ -20,6 +20,10 @@ from .coordinator import SboomCoordinator
 # - токен — даёт control над колонкой
 # - host/serial/device_id — PII (идентификация устройства/сети пользователя)
 # - client_id — UUID клиента, может коррелировать запросы
+# - latitude/longitude/location_accuracy — точные координаты дома
+# - network_ip — адрес в LAN пользователя
+# - raw_state_json/raw — сырые payload'ы колонки: содержат все поля выше
+#   строкой, куда async_redact_data не заглядывает
 TO_REDACT = {
     "pin_access_token",
     "client_id",
@@ -28,6 +32,12 @@ TO_REDACT = {
     "client_host",  # coordinator snapshot — тот же PII, что и host
     "serial",
     "serial_number",
+    "latitude",
+    "longitude",
+    "location_accuracy",
+    "network_ip",
+    "raw_state_json",
+    "raw",
 }
 
 
