@@ -105,3 +105,26 @@ async def test_stream_idle_writes_first_frame_without_position():
     with contextlib.suppress(ConnectionResetError, asyncio.TimeoutError):
         await asyncio.wait_for(cam._stream_idle(resp), timeout=2.5)
     assert resp.writes, "первый кадр обязан отрисоваться даже без позиции (BT)"
+
+
+# ────────── негативный кэш обложки при лежащем CDN (аудит #39) ──────────
+
+
+@pytest.mark.asyncio
+async def test_failed_cover_download_not_retried_every_frame():
+    """Idle-стрим зовёт _fetch_cover_raw каждый кадр: при лежащем CDN
+    неудачный URL кэшируется на время, а не качается заново раз в секунду."""
+    from sboom_ha.camera import SboomLyricsCamera
+
+    coord = build_coordinator(track=make_track())  # zvuk-трек: cover_url есть
+    cam = SboomLyricsCamera(coord, coord.entry)
+    calls: list[str] = []
+
+    async def failing_download(url: str):
+        calls.append(url)
+        return None
+
+    cam._download_cover = failing_download
+    await cam._fetch_cover_raw(coord.track)
+    await cam._fetch_cover_raw(coord.track)
+    assert len(calls) == 1, "повторный кадр не должен качать лежащий CDN заново"

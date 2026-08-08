@@ -10,7 +10,7 @@ import logging
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from ._deeplink import play_deeplink
@@ -124,7 +124,14 @@ async def _handle_bt_device(hass: HomeAssistant, call: ServiceCall) -> None:
     mac = call.data["mac_address"]
     cmd = _BT_CMD_MAP[call.data["command"]]
     for coord in _coords_from_call(hass, call):
-        await coord.client.bt_device_command(mac, cmd)
+        try:
+            await coord.client.bt_device_command(mac, cmd)
+        except (RuntimeError, TimeoutError, ConnectionError, OSError) as exc:
+            # Транспортные сбои → HomeAssistantError: внятное сообщение в UI
+            # вместо сырого traceback «Unknown error».
+            raise HomeAssistantError(
+                f"колонка {coord.client.host} не выполнила BT-команду: {exc}"
+            ) from exc
 
 
 def _zvuk_client(hass: HomeAssistant) -> ZvukClient:
@@ -172,7 +179,13 @@ async def _resolve_deeplink(hass: HomeAssistant, data: dict) -> str:
 async def _handle_play_music(hass: HomeAssistant, call: ServiceCall) -> None:
     deeplink = await _resolve_deeplink(hass, call.data)
     for coord in _coords_from_call(hass, call):
-        if not await play_deeplink(coord.client, deeplink):
+        try:
+            accepted = await play_deeplink(coord.client, deeplink)
+        except (RuntimeError, TimeoutError, ConnectionError, OSError) as exc:
+            raise HomeAssistantError(
+                f"колонка {coord.client.host} недоступна для play_music: {exc}"
+            ) from exc
+        if not accepted:
             raise ServiceValidationError(
                 f"колонка отклонила deeplink: {deeplink}"
             )

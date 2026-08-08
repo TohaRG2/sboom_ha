@@ -12,6 +12,7 @@ from sboom_ha.const import (
     OP_BT_DISCOVERABLE,
     OP_FIND_REMOTE,
     OP_SET_PLAYBACK_SPEED,
+    OP_SET_TRACK_POS,
 )
 
 
@@ -123,4 +124,20 @@ async def test_bt_device_command_encodes_mac_and_cmd():
         OP_BT_DEVICE_COMMAND, 2,
         field(1, 2, b"AA:BB:CC:00:11:22") + field(2, 0, BT_CMD_DISCONNECT),
     )
+    assert field(5, 2, inner) in ws.sent[0]
+
+
+# ─────────────────────── seek_to: clamp позиции (аудит #12) ───────────────────────
+
+@pytest.mark.asyncio
+async def test_seek_to_clamps_negative_position_to_zero():
+    """varint кодирует отрицательные числа мусором (-1 → 127 на колонке)."""
+    client = _make_client()
+    ws = _CapturingWS()
+    client._ws = ws
+
+    await client.seek_to(-5)
+
+    assert len(ws.sent) == 1
+    inner = field(OP_SET_TRACK_POS, 2, field(1, 0, 0))
     assert field(5, 2, inner) in ws.sent[0]

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import aiohttp
 from aiohttp import web
@@ -87,6 +88,10 @@ class SboomLyricsCamera(SboomEntity, Camera):
         # Cache: track_id -> готовый idle-JPEG (когда lyrics нет)
         self._idle_jpeg_track: str | None = None
         self._idle_jpeg: bytes | None = None
+        # Негативный кэш неудачного URL: idle-стрим зовёт _fetch_cover_raw
+        # каждый кадр — при лежащем CDN нельзя качать заново раз в секунду.
+        self._cover_fail_url: str | None = None
+        self._cover_fail_until: float = 0.0
 
     # ─────────── Snapshot (для предпросмотра в HA) ───────────
 
@@ -273,11 +278,16 @@ class SboomLyricsCamera(SboomEntity, Camera):
         if url is not None:
             if self._cover_cache_url == url and self._cover_raw is not None:
                 return self._cover_raw
-            raw = await self._download_cover(url)
-            if raw is not None:
-                self._cover_cache_url = url
-                self._cover_raw = raw
-                return raw
+            if url == self._cover_fail_url and time.monotonic() < self._cover_fail_until:
+                pass  # недавняя неудача — сразу фон-заглушка, без сети
+            else:
+                raw = await self._download_cover(url)
+                if raw is not None:
+                    self._cover_cache_url = url
+                    self._cover_raw = raw
+                    return raw
+                self._cover_fail_url = url
+                self._cover_fail_until = time.monotonic() + 60
         # Обложки нет (или скачать не вышло) → CC0-градиент вместо чёрного
         # экрана. Первый вызов читает файлы с диска (lru_cache) — в executor,
         # чтобы не блокировать event loop.

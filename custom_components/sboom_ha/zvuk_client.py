@@ -438,8 +438,10 @@ class ZvukClient:
         if not query.strip():
             return self._empty_search()
         types = ",".join(cat[0] for cat in _SEARCH_CATEGORIES)
-        token = await self.get_token()
         try:
+            # get_token внутри try: недоступность zvuk.com на этапе токена —
+            # тоже «ошибка → пустой результат», а не сырое исключение.
+            token = await self.get_token()
             resp = await self._http().get(
                 SEARCH_URL,
                 params={"query": query, "type": types, "limit": limit},

@@ -304,3 +304,32 @@ def test_parse_track_rich_fields_none_when_absent():
     assert t.media_source is None
     assert t.child_mode is None
     assert t.buffering is None
+
+
+# ────────── hardening парсеров: скобки в строках, числовой trackId (аудит #1/#25) ──
+
+
+def test_parse_track_with_closing_brace_in_artist_name():
+    """`}` внутри строкового поля до trackId ломал backward-скан к `{`."""
+    raw = b'{"artists":[{"id":"7","name":"A}B"}],"trackId":"55","title":"X","playing":true}'
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "55"
+    assert track.artists == ["A}B"]
+
+
+def test_parse_track_with_open_brace_in_artist_name():
+    """`{` внутри строки давал позицию внутри строки → json.loads падал."""
+    raw = b'{"artists":[{"id":"7","name":"A{B"}],"trackId":"55","title":"X","playing":true}'
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "55"
+    assert track.artists == ["A{B"]
+
+
+def test_parse_track_numeric_track_id():
+    """track_from_state поддерживает числовой trackId — push-путь обязан тоже."""
+    raw = b'{"artists":[{"id":"7","name":"A"}],"trackId":55,"title":"X","playing":true}'
+    track = SberSpeakerClient.parse_track(raw)
+    assert track is not None
+    assert track.track_id == "55"

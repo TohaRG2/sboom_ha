@@ -86,6 +86,8 @@ def decode(data: bytes) -> dict[int, Any]:
                 ln, i = _read_varint(data, i)
             except _Truncated:
                 return out
+            if i + ln > n:  # обрезанный payload — вернуть что успели
+                return out
             payload = data[i : i + ln]
             i += ln
             try:
@@ -136,9 +138,13 @@ def decode_repeated(data: bytes) -> dict[int, list[Any]]:
                 ln, i = _read_varint(data, i)
             except _Truncated:
                 return out
+            if i + ln > n:  # обрезанный payload — не отдаём как значение
+                return out
             out.setdefault(tag, []).append(data[i : i + ln])
             i += ln
         elif kind == 5:
+            if i + 4 > n:  # обрезанный fixed32 — вернуть что успели
+                return out
             out.setdefault(tag, []).append(data[i : i + 4])
             i += 4
         else:

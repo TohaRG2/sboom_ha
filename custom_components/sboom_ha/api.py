@@ -365,8 +365,10 @@ class SberSpeakerClient:
         await self._send_media_command(cmd)
 
     async def seek_to(self, position_sec: int) -> None:
-        # seek-операция: единица — секунды (наблюдаемое поведение)
-        cast = _field(OP_SET_TRACK_POS, 2, _field(1, 0, int(position_sec)))
+        # seek-операция: единица — секунды (наблюдаемое поведение).
+        # clamp обязателен: varint кодирует отрицательные числа мусором
+        # (-1 ушло бы на колонку как 127).
+        cast = _field(OP_SET_TRACK_POS, 2, _field(1, 0, max(0, int(position_sec))))
         await self._fire_and_forget(cast)
 
     async def set_playback_speed(self, rate: float) -> None:

@@ -51,9 +51,12 @@ def _safe_dataclass(obj: Any) -> Any:
 
 
 def _coordinator_snapshot(coord: SboomCoordinator) -> dict[str, Any]:
+    # last_update_success сознательно НЕ выгружается: контракт
+    # DataUpdateCoordinator обойдён (сбои полла глотаются, UpdateFailed не
+    # бросается) — поле всегда True и дезинформировало bug-report'ы.
+    # Честная доступность — coord.connected.
     return {
         "connected": coord.connected,
-        "last_update_success": coord.last_update_success,
         "update_interval_sec": (
             coord.update_interval.total_seconds() if coord.update_interval else None
         ),

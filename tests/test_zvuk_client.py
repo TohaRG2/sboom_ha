@@ -422,3 +422,19 @@ def test_parse_zvuk_url_bare_id_kind_podcast():
         "tid",
         "55",
     )
+
+
+# ────────── get_token внутри контракта «ошибка → пусто» (аудит #22) ──────────
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_when_token_endpoint_down():
+    """Недоступность zvuk.com на этапе токена не пробивает контракт
+    «ошибка → пустой результат» сырым httpx-исключением."""
+    async with respx.mock:
+        respx.get(PROFILE).mock(side_effect=httpx.ConnectError("down"))
+        client = ZvukClient()
+        res = await client.search("Летов")
+        await client.aclose()
+    assert res == {"best": None, "artists": [], "releases": [],
+                   "tracks": [], "playlists": []}
