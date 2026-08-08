@@ -6,6 +6,7 @@ import json
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -122,6 +123,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
         self._stopping = False
+        # Подписчики на остановку координатора (unload/reload entry) —
+        # напр. push-подписка панели, которой нужно терминальное событие,
+        # чтобы переподписаться на новый инстанс (аудит #32).
+        self._stop_listeners: list[Callable[[], None]] = []
 
         # Аппаратные датчики (libiio) и Zigbee-инвентарь (debug-CLI) — есть
         # только у некоторых моделей (R2). Capability определяется при старте;
@@ -140,6 +145,11 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Подряд идущие полностью неудачные poll-циклы при живом на вид сокете —
         # страховка от half-open, который не поймал транспортный WS ping.
         self._poll_failures = 0
+        # Generation-счётчик мутаций state/track из push/optimistic-путей.
+        # Poll снимает снапшот перед await и отбрасывает свой ответ, если
+        # счётчик изменился: ответ сформирован ДО более свежих данных
+        # (last-write-wins гонка — аудит #5).
+        self._mutations = 0
 
         self._http = async_get_clientsession(hass)
         # Жизненный цикл текстов песен — в отдельном менеджере (SRP).
@@ -247,8 +257,26 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("connected to %s", self.client.host)
         await self._refresh_state_and_track()
 
+    def async_add_stop_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Подписаться на остановку координатора. Возвращает unsubscribe."""
+        self._stop_listeners.append(listener)
+
+        def _remove() -> None:
+            if listener in self._stop_listeners:
+                self._stop_listeners.remove(listener)
+
+        return _remove
+
     async def async_stop(self) -> None:
         self._stopping = True
+        for listener in list(self._stop_listeners):
+            try:
+                listener()
+            except Exception:
+                _LOGGER.exception("stop-listener координатора упал")
+        self._stop_listeners.clear()
         self._set_connected(False)
         if self._supervisor_task:
             self._supervisor_task.cancel()
@@ -344,6 +372,10 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     # ─────────────────────── optimistic updates ───────────────────────
 
+    def _bump_mutations(self) -> None:
+        """Отметить push/optimistic-мутацию state/track (см. `_mutations`)."""
+        self._mutations += 1
+
     def apply_optimistic_state(self, **changes: Any) -> None:
         """Локально патчит SpeakerState сразу после успешной команды.
 
@@ -354,6 +386,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.state is None:
             return
         self.state = replace(self.state, **changes)
+        self._bump_mutations()
         self.async_update_listeners()
 
     def apply_optimistic_track(self, **changes: Any) -> None:
@@ -361,6 +394,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.track is None:
             return
         self.track = replace(self.track, **changes)
+        self._bump_mutations()
         self.async_update_listeners()
 
     # ─────────────────────── data handlers ───────────────────────
@@ -444,41 +478,53 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         prev_track = self.track
         prev_state = self.state
         poll_ok = False
+        gen = self._mutations
         try:
-            self.state = self._merge_state(await self.client.get_state())
+            new_state = await self.client.get_state()
             poll_ok = True
-            _LOGGER.debug("get_state -> volume=%s muted=%s",
-                          self.state.volume_percent if self.state else "?",
-                          self.state.muted if self.state else "?")
+            if self._mutations == gen:
+                self.state = self._merge_state(new_state)
+                _LOGGER.debug("get_state -> volume=%s muted=%s",
+                              self.state.volume_percent if self.state else "?",
+                              self.state.muted if self.state else "?")
+            else:
+                # Во время await пришёл push/optimistic — ответ сформирован
+                # до него и уже стейл. Следующий poll подтвердит.
+                _LOGGER.debug("get_state отброшен: state изменился во время await")
         except Exception as exc:
             # Обрыв в процессе poll'а — штатно, супервизор реконнектит.
             _LOGGER.debug("get_state failed: %s", exc)
+        gen = self._mutations
         try:
-            self.track = self._stamp_track(await self.client.get_metadata())
+            new_track = await self.client.get_metadata()
             poll_ok = True
-            self._maybe_fetch_lyrics()
-            if self.track:
-                _LOGGER.debug(
-                    "get_metadata -> title=%r artists=%s album=%r track_id=%s "
-                    "release_id=%s playing=%s pos=%s/%s prov=%s",
-                    self.track.title, self.track.artists, self.track.album,
-                    self.track.track_id, self.track.release_id,
-                    self.track.playing, self.track.position_sec,
-                    self.track.duration_sec, self.track.provider,
-                )
+            if self._mutations != gen:
+                _LOGGER.debug("get_metadata отброшен: track изменился во время await")
             else:
-                # get_metadata пуст (радио/Bluetooth — нет trackId). Now-playing
-                # для них живёт в GET_STATE (music/bluetooth_media_control app).
-                self.track = self._stamp_track(self._track_from_current_state())
+                self.track = self._stamp_track(new_track)
+                self._maybe_fetch_lyrics()
                 if self.track:
-                    self._maybe_fetch_lyrics()
                     _LOGGER.debug(
-                        "track_from_state -> title=%r station=%r source=%s playing=%s",
-                        self.track.title, self.track.station_name,
-                        self.track.media_source, self.track.playing,
+                        "get_metadata -> title=%r artists=%s album=%r track_id=%s "
+                        "release_id=%s playing=%s pos=%s/%s prov=%s",
+                        self.track.title, self.track.artists, self.track.album,
+                        self.track.track_id, self.track.release_id,
+                        self.track.playing, self.track.position_sec,
+                        self.track.duration_sec, self.track.provider,
                     )
                 else:
-                    _LOGGER.debug("get_metadata и GET_STATE без now-playing")
+                    # get_metadata пуст (радио/Bluetooth — нет trackId). Now-playing
+                    # для них живёт в GET_STATE (music/bluetooth_media_control app).
+                    self.track = self._stamp_track(self._track_from_current_state())
+                    if self.track:
+                        self._maybe_fetch_lyrics()
+                        _LOGGER.debug(
+                            "track_from_state -> title=%r station=%r source=%s playing=%s",
+                            self.track.title, self.track.station_name,
+                            self.track.media_source, self.track.playing,
+                        )
+                    else:
+                        _LOGGER.debug("get_metadata и GET_STATE без now-playing")
         except Exception as exc:
             _LOGGER.debug("get_metadata failed: %s", exc)
         try:
@@ -556,6 +602,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception:
                 _LOGGER.exception("state push parse failed")
         if changed:
+            self._bump_mutations()
             self._fire_change_events(prev_track, prev_state)
             # Прямое обновление + update_listeners вместо async_set_updated_data:
             # последний отменяет pending request_refresh (подтверждение команд)

@@ -70,12 +70,12 @@ def test_empty_timeline():
 # ────────────────── _stream_idle: первый кадр без позиции (аудит #9) ──────
 
 
-import asyncio
-import contextlib
+import asyncio  # noqa: E402
+import contextlib  # noqa: E402
 
-import pytest
+import pytest  # noqa: E402
 
-from tests._fakes import build_coordinator, make_track
+from tests._fakes import build_coordinator, make_track  # noqa: E402
 
 
 class _RecordingResponse:

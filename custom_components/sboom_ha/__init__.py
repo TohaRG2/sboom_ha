@@ -11,7 +11,7 @@ from homeassistant.components.frontend import (
 )
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
@@ -21,6 +21,7 @@ from .const import (
     OPT_PANEL_ENABLED,
     PANEL_STATIC_PATH,
     PANEL_URL_PATH,
+    ZVUK_CLIENT_KEY,
 )
 from .coordinator import SboomCoordinator
 from .services import async_register_services
@@ -55,7 +56,21 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """
     async_register_services(hass)
     async_setup_websocket_api(hass)
+
+    async def _close_zvuk(_event: Any) -> None:
+        await _async_close_zvuk_client(hass)
+
+    # Кешированный ZvukClient держит пул httpx-соединений — закрываем при
+    # остановке HA (аудит #31; раньше aclose() был мёртвым кодом).
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _close_zvuk)
     return True
+
+
+async def _async_close_zvuk_client(hass: HomeAssistant) -> None:
+    """Закрыть разделяемый ZvukClient (если создавался)."""
+    client = hass.data.pop(ZVUK_CLIENT_KEY, None)
+    if client is not None:
+        await client.aclose()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SboomConfigEntry) -> bool:
@@ -89,8 +104,11 @@ async def _async_register_panel(
     Integrations → SBoom → Configure) управляется только пункт в боковом меню.
     """
     # 1. Статика www/ — один раз на HA, вне зависимости от panel_enabled.
+    # Маркер ставится ДО await'ов: при параллельном setup двух entries иначе
+    # статика регистрировалась бы дважды (TOCTOU — аудит #14).
     static_marker = f"{DOMAIN}_static_registered"
     if not hass.data.get(static_marker):
+        hass.data[static_marker] = True
         panel_dir = str(pathlib.Path(__file__).parent / "www")
         await hass.http.async_register_static_paths(
             [StaticPathConfig(PANEL_STATIC_PATH, panel_dir, cache_headers=False)]
@@ -98,35 +116,59 @@ async def _async_register_panel(
         # Версия из manifest → cache-buster JS меняется вместе с версией.
         integration = await async_get_integration(hass, DOMAIN)
         hass.data[f"{DOMAIN}_version"] = integration.version or "0"
-        hass.data[static_marker] = True
 
-    # 2. Боковая панель — по опции panel_enabled.
+    # 2. Боковая панель — refcount-семантика (см. _sync_panel).
+    _sync_panel(hass, assume_loaded=entry)
+
+
+def _sync_panel(
+    hass: HomeAssistant,
+    *,
+    assume_loaded: ConfigEntry | None = None,
+    exclude: ConfigEntry | None = None,
+) -> None:
+    """Привести панель к желаемому состоянию: существует, пока её хочет
+    хотя бы один живой entry.
+
+    Раньше entry с `panel_enabled=False` при своей перезагрузке безусловно
+    удалял панель другой колонки, а unload вовсе не снимал её — пункт меню
+    оставался ссылаться на мёртвый backend (аудит #14).
+
+    assume_loaded — entry, который сейчас в процессе setup (ещё не числится
+    loaded); exclude — entry в процессе unload (ещё числится loaded).
+    """
     marker = f"{DOMAIN}_panel_registered"
-    if not entry.options.get(OPT_PANEL_ENABLED, DEFAULT_PANEL_ENABLED):
-        if hass.data.pop(marker, None):
-            async_remove_panel(hass, PANEL_URL_PATH)
-        return
-    if hass.data.get(marker):
-        return
-
-    version = hass.data[f"{DOMAIN}_version"]
-    async_register_built_in_panel(
-        hass,
-        component_name="custom",
-        sidebar_title="SberBoom",
-        sidebar_icon="mdi:speaker",
-        frontend_url_path=PANEL_URL_PATH,
-        config={
-            # version прокидывается в панель через this.panel.config.version.
-            "version": version,
-            "_panel_custom": {
-                "name": "sboom-panel",
-                "module_url": f"{PANEL_STATIC_PATH}/sboom-panel.js?v={version}",
-            },
-        },
-        require_admin=False,
+    entries = list(hass.config_entries.async_loaded_entries(DOMAIN))
+    if assume_loaded is not None and assume_loaded not in entries:
+        entries.append(assume_loaded)
+    wanted = any(
+        e.options.get(OPT_PANEL_ENABLED, DEFAULT_PANEL_ENABLED)
+        for e in entries
+        if e is not exclude
     )
-    hass.data[marker] = True
+    registered = bool(hass.data.get(marker))
+    if wanted and not registered:
+        version = hass.data.get(f"{DOMAIN}_version", "0")
+        async_register_built_in_panel(
+            hass,
+            component_name="custom",
+            sidebar_title="SberBoom",
+            sidebar_icon="mdi:speaker",
+            frontend_url_path=PANEL_URL_PATH,
+            config={
+                # version прокидывается в панель через this.panel.config.version.
+                "version": version,
+                "_panel_custom": {
+                    "name": "sboom-panel",
+                    "module_url": f"{PANEL_STATIC_PATH}/sboom-panel.js?v={version}",
+                },
+            },
+            require_admin=False,
+        )
+        hass.data[marker] = True
+    elif not wanted and registered:
+        async_remove_panel(hass, PANEL_URL_PATH)
+        hass.data.pop(marker, None)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SboomConfigEntry) -> bool:
@@ -142,6 +184,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: SboomConfigEntry) -> bo
         coordinator: SboomCoordinator | None = getattr(entry, "runtime_data", None)
         if coordinator is not None:
             await coordinator.async_stop()
+        # Панель убирается, если это был последний entry, который её хотел.
+        _sync_panel(hass, exclude=entry)
     return unload_ok
 
 

@@ -101,6 +101,13 @@ export class SboomFeedBase extends LitElement {
   }
 
   _applyState(state) {
+    if (state?.terminated) {
+      // Координатор остановлен (reload entry в HA) — переподписываемся на
+      // новый инстанс с небольшой паузой на завершение reload.
+      this._teardownFeed();
+      setTimeout(() => this._ensureFeed(), 2000);
+      return;
+    }
     this._state = state;
     this._error = "";
     this._onStateApplied(state);

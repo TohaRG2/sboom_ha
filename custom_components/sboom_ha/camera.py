@@ -278,8 +278,10 @@ class SboomLyricsCamera(SboomEntity, Camera):
                 self._cover_cache_url = url
                 self._cover_raw = raw
                 return raw
-        # Обложки нет (или скачать не вышло) → CC0-градиент вместо чёрного экрана.
-        return fallback_cover(_cover_seed(track))
+        # Обложки нет (или скачать не вышло) → CC0-градиент вместо чёрного
+        # экрана. Первый вызов читает файлы с диска (lru_cache) — в executor,
+        # чтобы не блокировать event loop.
+        return await asyncio.to_thread(fallback_cover, _cover_seed(track))
 
     async def _download_cover(self, url: str) -> bytes | None:
         try:

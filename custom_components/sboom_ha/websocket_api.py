@@ -28,7 +28,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from ._deeplink import play_deeplink, send_server_action
-from .const import DOMAIN
+from .const import DOMAIN, ZVUK_CLIENT_KEY
 from .coordinator import SboomCoordinator
 from .helpers import cover_url
 from .zvuk_client import ZvukClient
@@ -37,8 +37,6 @@ if TYPE_CHECKING:
     from ._models import SpeakerState, TrackInfo
 
 _LOGGER = logging.getLogger(__name__)
-
-_ZVUK_CLIENT_KEY = f"{DOMAIN}_zvuk_client"
 
 # Свободный deeplink из фронтенда уходит на колонку как есть — принимаем
 # только staros://-схему с безопасным набором символов (без пробелов/кавычек:
@@ -81,10 +79,10 @@ def _get_zvuk_client(hass: HomeAssistant) -> ZvukClient:
     Отдельный HTTP-клиент со своим cookie jar (anti-bot Звука: 307-редирект +
     cookie ``spid``), поэтому не переиспользуем shared aiohttp-сессию HA.
     """
-    client: ZvukClient | None = hass.data.get(_ZVUK_CLIENT_KEY)
+    client: ZvukClient | None = hass.data.get(ZVUK_CLIENT_KEY)
     if client is None:
         client = ZvukClient()
-        hass.data[_ZVUK_CLIENT_KEY] = client
+        hass.data[ZVUK_CLIENT_KEY] = client
     return client
 
 
@@ -227,7 +225,24 @@ def ws_subscribe(
             )
         )
 
-    connection.subscriptions[msg["id"]] = coordinator.async_add_listener(_forward)
+    @callback
+    def _on_stop() -> None:
+        # Координатор останавливается (reload/unload entry) — терминальное
+        # событие, по которому фронтенд переподписывается на новый инстанс
+        # (иначе подписка замирала бы на мёртвом координаторе — аудит #32).
+        connection.send_message(
+            websocket_api.event_message(msg["id"], {"terminated": True})
+        )
+
+    unsub_update = coordinator.async_add_listener(_forward)
+    unsub_stop = coordinator.async_add_stop_listener(_on_stop)
+
+    @callback
+    def _unsubscribe() -> None:
+        unsub_update()
+        unsub_stop()
+
+    connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"])
     _forward()  # начальное состояние
 

@@ -67,6 +67,11 @@ class _FakeBus:
     def async_fire(self, event_type: str, event_data: dict[str, Any] | None = None) -> None:
         self.fired.append((event_type, dict(event_data or {})))
 
+    def async_listen_once(self, event_type: str, listener) -> None:
+        # Стаб: слушателей не вызываем, только фиксируем регистрацию.
+        self.listeners = getattr(self, "listeners", [])
+        self.listeners.append((event_type, listener))
+
 
 def callback(fn):
     """Stub @callback decorator (no-op)."""
@@ -144,6 +149,10 @@ class _FakeConfigEntries:
         self.reloaded.append(entry_id)
 
     def async_entries(self, domain=None):
+        return list(self._entries.values())
+
+    def async_loaded_entries(self, domain=None):
+        # Стаб не отслеживает состояние — считаем все добавленные загруженными.
         return list(self._entries.values())
 
 
@@ -842,6 +851,7 @@ def install_stubs() -> None:
         CONF_PLATFORM="platform",
         CONF_TYPE="type",
         PERCENTAGE="%",
+        EVENT_HOMEASSISTANT_STOP="homeassistant_stop",
     )
     _make_module(
         "homeassistant.core",

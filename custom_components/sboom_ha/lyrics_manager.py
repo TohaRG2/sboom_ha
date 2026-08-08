@@ -72,6 +72,10 @@ class LyricsManager:
         # трек: пока играет тот же — не перезапрашиваем API каждый poll.
         self._volatile_key: str | None = None
         self._volatile: Lyrics | None = None
+        # Ключ ПОСЛЕДНЕГО запрошенного некаталожного трека: поздний результат
+        # для предыдущего трека (A→B, A долетел после B) отбрасывается —
+        # иначе слот перезаписывался бы в порядке завершения задач (аудит #33).
+        self._volatile_wanted: str | None = None
         # Персистентный кеш (JSON в .storage/, переживает рестарты HA).
         self._store: Store = Store(
             hass, LYRICS_STORE_VERSION, f"{DOMAIN}_lyrics_{entry.entry_id}"
@@ -128,7 +132,10 @@ class LyricsManager:
     def _schedule_volatile_fetch(self, track: TrackInfo) -> None:
         """НЕкаталожный трек (BT/радио): fetch напрямую, без диск-кэша."""
         key = _synthetic_key(track)
-        if key is None or key == self._volatile_key or key in self._inflight:
+        if key is None:
+            return
+        self._volatile_wanted = key
+        if key == self._volatile_key or key in self._inflight:
             return
         self._inflight.add(key)
         self._entry.async_create_background_task(
@@ -159,6 +166,8 @@ class LyricsManager:
             )
             if result is None:
                 return  # сетевая ошибка — retry при следующем track-update
+            if self._volatile_wanted not in (None, key):
+                return  # трек уже сменился — стейл-результат не пишем
             self._volatile_key = key
             self._volatile = result
             self._on_update()

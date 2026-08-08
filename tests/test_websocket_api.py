@@ -46,6 +46,7 @@ def test_serialize_track_uses_fallback_cover_for_bt_radio():
     """Для BT/радио cover_url(track) пуст — панель получает найденную обложку,
     как это уже делают media_player и camera."""
     from sboom_ha.websocket_api import _serialize_track
+
     from tests._fakes import make_track
 
     track = make_track(provider=None, release_id=None, artist_ids=[])
@@ -55,6 +56,7 @@ def test_serialize_track_uses_fallback_cover_for_bt_radio():
 
 def test_serialize_track_prefers_catalog_cover():
     from sboom_ha.websocket_api import _serialize_track
+
     from tests._fakes import make_track
 
     track = make_track(provider="zvuk", release_id="200")
@@ -66,6 +68,7 @@ def test_serialize_track_exposes_received_ts_ms():
     """Панель экстраполирует позицию от часов HA (received_ts), а не от часов
     колонки (position_ts_ms) — тот же класс бага, что чинили в media_player."""
     from sboom_ha.websocket_api import _serialize_track
+
     from tests._fakes import make_track
 
     track = make_track()

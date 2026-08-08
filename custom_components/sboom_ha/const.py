@@ -133,6 +133,9 @@ CONF_DEVICE_FIRMWARE = "device_firmware"
 
 # Public image CDN (без auth). Параметры: type=release|track|artist, id, size=NxN.
 ZVUK_IMAGE_CDN = "https://cdn-image.zvuk.com/pic"
+# Ключ hass.data для единственного разделяемого ZvukClient (services +
+# websocket_api). Единственность инстанса держится на этой константе.
+ZVUK_CLIENT_KEY = f"{DOMAIN}_zvuk_client"
 COVER_SIZE = "600x600"
 
 # Lyrics: сколько треков держим в LRU-кэше coordinator.

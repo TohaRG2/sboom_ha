@@ -14,7 +14,13 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from ._deeplink import play_deeplink
-from .const import BT_CMD_CONNECT, BT_CMD_DISCONNECT, BT_CMD_REMOVE, DOMAIN
+from .const import (
+    BT_CMD_CONNECT,
+    BT_CMD_DISCONNECT,
+    BT_CMD_REMOVE,
+    DOMAIN,
+    ZVUK_CLIENT_KEY,
+)
 from .coordinator import SboomCoordinator
 from .zvuk_client import ZvukClient
 
@@ -24,8 +30,6 @@ SERVICE_REFRESH_METADATA = "refresh_metadata"
 SERVICE_REAUTH = "reauth"
 SERVICE_BT_DEVICE = "bluetooth_device"
 SERVICE_PLAY_MUSIC = "play_music"
-
-_ZVUK_CLIENT_KEY = f"{DOMAIN}_zvuk_client"
 
 _BT_CMD_MAP = {
     "connect": BT_CMD_CONNECT,
@@ -125,10 +129,10 @@ async def _handle_bt_device(hass: HomeAssistant, call: ServiceCall) -> None:
 
 def _zvuk_client(hass: HomeAssistant) -> ZvukClient:
     """Единственный кешированный ZvukClient (общий с websocket_api)."""
-    client: ZvukClient | None = hass.data.get(_ZVUK_CLIENT_KEY)
+    client: ZvukClient | None = hass.data.get(ZVUK_CLIENT_KEY)
     if client is None:
         client = ZvukClient()
-        hass.data[_ZVUK_CLIENT_KEY] = client
+        hass.data[ZVUK_CLIENT_KEY] = client
     return client
 
 
