@@ -50,7 +50,6 @@ from .const import (
     OP_GET_META_DATA,
     OP_GET_PAIRED_BT,
     OP_GET_PLAYING_QUEUE,
-    OP_GET_SCANNED_BT,
     OP_GET_STATE,
     OP_KEEP_ALIVE,
     OP_MEDIA_COMMAND,
@@ -96,10 +95,6 @@ _LOGGER = logging.getLogger(__name__)
 
 class PairTimeout(Exception):
     """Колонка не подтвердила pair (нет нажатия '+' за timeout)."""
-
-
-class AuthError(Exception):
-    """Колонка отвергла наш токен/UUID."""
 
 
 class SberSpeakerClient:
@@ -302,11 +297,6 @@ class SberSpeakerClient:
         resp = await self._request_response(_field(OP_GET_PAIRED_BT, 2, _field(1, 2, b"")))
         return _parse_paired_bt(resp)
 
-    async def get_scanned_bt_devices(self) -> list[BluetoothDevice]:
-        """op=21 — список найденных при сканировании Bluetooth-устройств."""
-        resp = await self._request_response(_field(OP_GET_SCANNED_BT, 2, _field(1, 2, b"")))
-        return _parse_scanned_bt(resp)
-
     async def bt_device_command(self, mac: str, cmd: int) -> None:
         """op=20 — команда BT-устройству по MAC.
 
@@ -432,18 +422,33 @@ class SberSpeakerClient:
             await ws.send(self._envelope(str(uuid.uuid4()), request_data))
 
     async def _request_response(self, request_data: bytes, timeout: float = 5.0) -> bytes:
+        req_id = str(uuid.uuid4())
+        return await self.send_raw_request(
+            self._envelope(req_id, request_data), req_id, timeout=timeout
+        )
+
+    async def send_raw_request(
+        self, envelope: bytes, msg_id: str, timeout: float = 5.0
+    ) -> bytes:
+        """Отправить ГОТОВЫЙ envelope и дождаться ответа с тем же msg_id.
+
+        Публичная точка для нестандартных конвертов (ServerAction/deeplink,
+        см. `_deeplink.py`): инкапсулирует `_ws`/`_pending`/`_lock`, чтобы
+        внешние модули не зависели от приватных внутренностей клиента
+        (аудит #16). Envelope обязан несёт `msg_id` в поле корреляции —
+        listener матчит ответ по нему.
+        """
         ws = self._ws
         if not ws:
             raise RuntimeError("not connected")
-        req_id = str(uuid.uuid4())
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._pending[req_id] = fut
+        self._pending[msg_id] = fut
         try:
             async with self._lock:
-                await ws.send(self._envelope(req_id, request_data))
+                await ws.send(envelope)
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
-            self._pending.pop(req_id, None)
+            self._pending.pop(msg_id, None)
 
     async def _listen_loop(self) -> None:
         assert self._ws is not None

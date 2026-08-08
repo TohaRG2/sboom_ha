@@ -979,7 +979,23 @@ def install_stubs() -> None:
         TriggerActionType=object,
         TriggerInfo=object,
     )
-    _make_module("homeassistant.components.sensor", SensorEntity=SensorEntity)
+    class SensorStateClass(str, Enum):
+        MEASUREMENT = "measurement"
+        TOTAL = "total"
+        TOTAL_INCREASING = "total_increasing"
+
+    class SensorDeviceClass(str, Enum):
+        TIMESTAMP = "timestamp"
+        ENUM = "enum"
+        ILLUMINANCE = "illuminance"
+        TEMPERATURE = "temperature"
+
+    _make_module(
+        "homeassistant.components.sensor",
+        SensorEntity=SensorEntity,
+        SensorStateClass=SensorStateClass,
+        SensorDeviceClass=SensorDeviceClass,
+    )
     _make_module("homeassistant.components.button", ButtonEntity=ButtonEntity)
     _make_module("homeassistant.components.number", NumberEntity=NumberEntity)
     _make_module("homeassistant.components.switch", SwitchEntity=SwitchEntity)

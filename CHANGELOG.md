@@ -6,6 +6,26 @@
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-08-08
+
+Волна 5 (финальная) по итогам code review (`REVIEW_REPORT.md`): архитектурный рефакторинг. Поведение не меняется, внутренние границы — да (MINOR).
+
+### Changed
+- **Единый командный слой `coordinator.async_execute(action, value)` (аудит #18).** Один источник политики «команда → вызов клиента → optimistic-патч → refresh»: `media_player`, `switch`/`number`/`select` и ws-команда `sboom/command` панели стали тонкими адаптерами. Побочно чинит несогласованность: `switch`/`number` теперь делают optimistic-патч (переключатель mute и слайдер громкости больше не «отпрыгивают» в окне debounce), `select`/repeat — единообразно.
+- **Единый источник deeplink и инфраструктурных хелперов (аудит #17, #19).** Новый модуль `_ha_helpers.py`: `get_zvuk_client(hass)` (singleton, ключ `const.ZVUK_CLIENT_KEY`) и `iter_coordinators(hass)` вместо трёх скопированных реализаций в `services`/`websocket_api`/`device_action`. Маппинг zvuk-URL→deeplink — только в `ZvukClient` (см. 0.35.3).
+- **Публичный `client.send_raw_request(envelope, msg_id, timeout)` (аудит #16).** `_deeplink.py` больше не лезет в приватные `client._ws`/`_pending`/`_lock` — инкапсуляция корреляции request/response вынесена в клиент; `_request_response` переиспользует её.
+- **Аппаратная подсистема выделена в `HwMonitor` (аудит #20).** iio-датчики + Zigbee/Matter CLI со своим probe/poll и снапшот-полями — вне `SboomCoordinator` (SRP). Доступ сенсоров — `coordinator.hw.*`; старый `coordinator.iio_cap`/… сохранён как property-делегаты.
+- **DRY-вычистки:** общий `_draw_frame_chrome` для караоке- и idle-кадров (аудит #45); `coordinator.device_state` вместо трёх копий `_dev()` (аудит #46); `LyricsManager._run_fetch` + `helpers.track_identity_key` для обоих менеджеров (аудит #47).
+
+### Removed
+- **Мёртвый код (аудит #43):** `api.AuthError`, `client.get_scanned_bt_devices` (op=21 не использовался), `image_render.draw_cover`/`draw_lyrics` (заменены yandex-версиями), `cli4242.matter_count`, `coordinator.matter_raw`, `SpeakerState.track`.
+
+### Fixed
+- **Инкапсуляция (аудит #44):** публичные `LyricsManager.supports_track()` и `coordinator.stopping` вместо импорта приватного `_synthetic_key` в `sensor.py` и чтения `coord._stopping` в `diagnostics.py`; `SboomSensorSpec.state_class/device_class` типизированы enum'ами `SensorStateClass`/`SensorDeviceClass` вместо строковых литералов.
+
+### Docs
+- **Зафиксирован трейдофф WSS без верификации сертификата (аудит #40)** в разделе «Известные ограничения» README: self-signed сертификат колонки, модель угроз — доверенная LAN, возможный TOFU-пиннинг в будущем.
+
 ## [0.35.6] — 2026-08-08
 
 Волна 4 исправлений по итогам code review (`REVIEW_REPORT.md`): устойчивость, hardening парсеров, гигиена ошибок.

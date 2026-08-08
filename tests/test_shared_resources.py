@@ -34,12 +34,16 @@ async def test_close_zvuk_client_noop_when_absent():
 
 
 def test_zvuk_singleton_shared_between_services_and_ws():
-    """services и websocket_api обязаны видеть один и тот же инстанс."""
+    """services и websocket_api обязаны видеть один и тот же инстанс —
+    после аудита #19 оба используют общий _ha_helpers.get_zvuk_client."""
     from sboom_ha import services, websocket_api
+    from sboom_ha._ha_helpers import get_zvuk_client
 
+    assert services.get_zvuk_client is get_zvuk_client
+    assert websocket_api.get_zvuk_client is get_zvuk_client
     hass = HomeAssistant()
-    c1 = services._zvuk_client(hass)
-    c2 = websocket_api._get_zvuk_client(hass)
+    c1 = get_zvuk_client(hass)
+    c2 = get_zvuk_client(hass)
     assert c1 is c2
     assert hass.data[ZVUK_CLIENT_KEY] is c1
 

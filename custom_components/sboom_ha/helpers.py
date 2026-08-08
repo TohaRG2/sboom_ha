@@ -12,6 +12,17 @@ if TYPE_CHECKING:
     from .coordinator import SboomCoordinator
 
 
+def track_identity_key(track: TrackInfo) -> str | None:
+    """`title|artists` (lower) — идентичность некаталожного трека (BT/радио).
+
+    Общий ключ для LyricsManager и CoverManager (аудит #47): у некаталожного
+    контента нет track_id, треки различаются только по метаданным.
+    """
+    if track.title and track.artists:
+        return f"{track.title}|{','.join(track.artists)}".lower()
+    return None
+
+
 def sber_device_id(entry) -> str | None:
     """Sber-идентификатор колонки с единым fallback на host.
 

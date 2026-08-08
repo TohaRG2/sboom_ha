@@ -43,7 +43,8 @@ class SboomVolumeNumber(SboomEntity, NumberEntity):
         return self.coordinator.state.volume_percent if self.coordinator.state else None
 
     async def async_set_native_value(self, value: float) -> None:
+        # Единый командный слой: optimistic-патч + refresh внутри (аудит #18) —
+        # слайдер не «отпрыгивает» к старому значению в окне поллинга.
         await self._run_command(
-            self.coordinator.client.set_volume(int(value)), action="set volume"
+            self.coordinator.async_execute("volume", int(value)), action="set volume"
         )
-        await self.coordinator.async_request_refresh()

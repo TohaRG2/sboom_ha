@@ -14,13 +14,8 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from ._deeplink import play_deeplink
-from .const import (
-    BT_CMD_CONNECT,
-    BT_CMD_DISCONNECT,
-    BT_CMD_REMOVE,
-    DOMAIN,
-    ZVUK_CLIENT_KEY,
-)
+from ._ha_helpers import get_zvuk_client, iter_coordinators
+from .const import BT_CMD_CONNECT, BT_CMD_DISCONNECT, BT_CMD_REMOVE, DOMAIN
 from .coordinator import SboomCoordinator
 from .zvuk_client import ZvukClient
 
@@ -68,12 +63,7 @@ SCHEMA_PLAY_MUSIC = vol.Schema(
 
 def _loaded_coordinators(hass: HomeAssistant) -> dict[str, SboomCoordinator]:
     """entry_id → coordinator для всех загруженных entries интеграции."""
-    result: dict[str, SboomCoordinator] = {}
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        coordinator = getattr(entry, "runtime_data", None)
-        if isinstance(coordinator, SboomCoordinator):
-            result[entry.entry_id] = coordinator
-    return result
+    return {entry.entry_id: coord for entry, coord in iter_coordinators(hass)}
 
 
 def _coords_from_call(hass: HomeAssistant, call: ServiceCall) -> list[SboomCoordinator]:
@@ -134,15 +124,6 @@ async def _handle_bt_device(hass: HomeAssistant, call: ServiceCall) -> None:
             ) from exc
 
 
-def _zvuk_client(hass: HomeAssistant) -> ZvukClient:
-    """Единственный кешированный ZvukClient (общий с websocket_api)."""
-    client: ZvukClient | None = hass.data.get(ZVUK_CLIENT_KEY)
-    if client is None:
-        client = ZvukClient()
-        hass.data[ZVUK_CLIENT_KEY] = client
-    return client
-
-
 async def _resolve_deeplink(hass: HomeAssistant, data: dict) -> str:
     """url / id+kind / query → staros://music-deeplink."""
     url = data.get("url")
@@ -164,7 +145,7 @@ async def _resolve_deeplink(hass: HomeAssistant, data: dict) -> str:
 
     query = data.get("query")
     if query:
-        deeplink = await _zvuk_client(hass).search_first_deeplink(query)
+        deeplink = await get_zvuk_client(hass).search_first_deeplink(query)
         if deeplink:
             return deeplink
         raise ServiceValidationError(

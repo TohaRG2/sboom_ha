@@ -52,9 +52,8 @@ class SboomRepeatSelect(SboomEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self._run_command(
-            self.coordinator.client.media_repeat(option), action="set repeat"
+            self.coordinator.async_execute("repeat", option), action="set repeat"
         )
-        await self.coordinator.async_request_refresh()
 
 
 class SboomPlaybackSpeedSelect(SboomEntity, SelectEntity):
@@ -83,7 +82,6 @@ class SboomPlaybackSpeedSelect(SboomEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self._run_command(
-            self.coordinator.client.set_playback_speed(float(option)),
+            self.coordinator.async_execute("playback_speed", float(option)),
             action="set playback speed",
         )
-        await self.coordinator.async_request_refresh()

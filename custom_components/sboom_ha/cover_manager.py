@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from .const import DOMAIN
 from .cover_client import fetch_cover
+from .helpers import track_identity_key
 
 if TYPE_CHECKING:
     import aiohttp
@@ -32,9 +33,7 @@ def _cover_key(track: TrackInfo) -> str | None:
     """
     if track.track_id:
         return None
-    if track.title and track.artists:
-        return f"{track.title}|{','.join(track.artists)}".lower()
-    return None
+    return track_identity_key(track)
 
 
 class CoverManager:

@@ -107,11 +107,6 @@ def parse_matter_list(text: str) -> list[MatterDevice]:
     return devices
 
 
-def matter_count(text: str) -> int:
-    """Число Matter-устройств из вывода `matter list` (0 для пустого списка)."""
-    return len(parse_matter_list(text))
-
-
 class Cli4242Client:
     """Одноразовые соединения к debug-CLI :4242 (per-poll).
 

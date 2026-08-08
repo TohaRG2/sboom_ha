@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 from sboom_ha.cli4242 import (
     Cli4242Client,
-    matter_count,
     parse_matter_list,
     parse_zigbee_list,
 )
@@ -148,13 +147,6 @@ def test_parse_matter_list_real_device():
     assert d.model == "MTFFF40002"
     assert d.serial == "FCH1000237"
     assert d.rssi == -55
-
-
-def test_matter_count_real_table_and_empty():
-    """Заголовок НЕ считается устройством (регресс: было 2 вместо 1)."""
-    assert matter_count(_MATTER_TBL) == 1
-    assert matter_count("Matter device list is empty") == 0
-    assert matter_count("") == 0
 
 
 @pytest.mark.asyncio

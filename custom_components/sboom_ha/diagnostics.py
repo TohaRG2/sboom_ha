@@ -60,7 +60,7 @@ def _coordinator_snapshot(coord: SboomCoordinator) -> dict[str, Any]:
         "update_interval_sec": (
             coord.update_interval.total_seconds() if coord.update_interval else None
         ),
-        "stopping": coord._stopping,
+        "stopping": coord.stopping,
         "lyrics_cache_size": len(coord.lyrics.by_track),
         "lyrics_inflight_count": coord.lyrics.inflight_count,
         "client_host": coord.client.host,
