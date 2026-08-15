@@ -31,7 +31,7 @@ from ._deeplink import play_deeplink, send_server_action
 from ._ha_helpers import get_zvuk_client, iter_coordinators
 from .const import DOMAIN
 from .coordinator import COMMAND_SPECS, SboomCoordinator
-from .helpers import cover_url
+from .helpers import cover_url, sber_device_id
 from .zvuk_client import ZvukClient
 
 if TYPE_CHECKING:
@@ -145,9 +145,18 @@ def ws_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Список доступных колонок для селектора панели."""
+    """Список доступных колонок для селектора панели.
+
+    `serial` (= Sber device_id) — мост к сущностям настроек/эквалайзера
+    интеграции sberhome: у поженённого HA-устройства общий identifier
+    ``("sber_speaker", serial)``, по нему фронтенд находит эквалайзер.
+    """
     devices = [
-        {"entry_id": entry.entry_id, "name": entry.title}
+        {
+            "entry_id": entry.entry_id,
+            "name": entry.title,
+            "serial": sber_device_id(entry),
+        }
         for entry, _ in iter_coordinators(hass)
     ]
     connection.send_result(msg["id"], {"devices": devices})
@@ -156,7 +165,7 @@ def ws_devices(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/state",
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @callback
@@ -176,7 +185,7 @@ def ws_state(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/subscribe",
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @callback
@@ -323,7 +332,7 @@ async def ws_release(
         # kind / pt — синонимы (pt = playlist type в терминах Звука).
         vol.Optional("kind"): str,
         vol.Optional("pt"): str,
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -440,7 +449,7 @@ async def ws_track_meta(
         vol.Required("type"): "sboom/command",
         vol.Required("action"): vol.In(sorted(COMMAND_SPECS)),
         vol.Optional("value"): vol.Any(int, float, bool, str),
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -475,7 +484,7 @@ async def ws_command(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/queue",
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response

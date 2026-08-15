@@ -36,7 +36,10 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
         # Полный набор полей DeviceInfo. None-поля HA проигнорирует, поэтому
         # для manual flow (без zeroconf) часть полей просто не будет показана.
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
+            # Общий с sberhome identifier ("sber_speaker", <serial>) — HA сольёт
+            # обе интеграции колонки в одну карточку устройства (медиа отсюда,
+            # настройки/эквалайзер из sberhome). Ключ — общий serial колонки.
+            identifiers={(DOMAIN, device_id), ("sber_speaker", device_id)},
             name=entry.data.get(CONF_DEVICE_NAME) or f"SberBoom {host}",
             manufacturer="SberDevices",
             model=entry.data.get(CONF_DEVICE_MODEL) or "SberBoom",

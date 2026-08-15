@@ -21,6 +21,7 @@ await Promise.all([
   import(`./components/sboom-track-row.js${_q}`),
   import(`./components/sboom-tile.js${_q}`),
   import(`./components/sboom-browse.js${_q}`),
+  import(`./components/sboom-equalizer.js${_q}`),
 ]);
 
 import { html, css, nothing } from "./lit-base.js";
@@ -100,6 +101,12 @@ class SboomPanel extends SboomFeedBase {
   get _deviceName() {
     const d = this._devices.find((x) => x.entry_id === this._entryId);
     return d?.name || "SberBoom";
+  }
+
+  // serial активной колонки — мост к сущностям эквалайзера sberhome
+  get _serial() {
+    const d = this._devices.find((x) => x.entry_id === this._entryId);
+    return d?.serial || null;
   }
 
   // хук базы: новое состояние → пересчитать ambient glow из обложки
@@ -369,6 +376,10 @@ class SboomPanel extends SboomFeedBase {
         sboom-browse {
           display: block;
         }
+        sboom-equalizer {
+          display: block;
+          margin-top: 16px;
+        }
 
         @media (max-width: 820px) {
           .wrap {
@@ -460,6 +471,12 @@ class SboomPanel extends SboomFeedBase {
               ></sboom-controls>
             </div>
           </div>
+
+          <!-- параметры звука — прямо под карточкой с обложкой -->
+          <sboom-equalizer
+            .hass=${this.hass}
+            .serial=${this._serial}
+          ></sboom-equalizer>
         </section>
 
         <section class="right">
