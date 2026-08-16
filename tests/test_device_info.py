@@ -20,7 +20,7 @@ def test_device_info_full_zeroconf_data():
     mp = SboomMediaPlayer(coord, entry)
     di = mp._attr_device_info
 
-    assert di.identifiers == {(DOMAIN, "serial-abc-123")}
+    assert di.identifiers == {(DOMAIN, "serial-abc-123"), ("sber_speaker", "serial-abc-123")}
     assert di.name == "Спальня"
     assert di.manufacturer == "SberDevices"
     assert di.model == "sberboom-r2"
@@ -51,7 +51,7 @@ def test_device_info_manual_flow_partial():
     di = mp._attr_device_info
 
     # identifiers идут от device_id, fallback на host
-    assert di.identifiers == {(DOMAIN, "10.0.0.99")}
+    assert di.identifiers == {(DOMAIN, "10.0.0.99"), ("sber_speaker", "10.0.0.99")}
     # name fallback'ится на f"SberBoom {host}"
     assert di.name == "SberBoom 10.0.0.99"
     # model fallback'ится на дефолт
