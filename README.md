@@ -1,8 +1,8 @@
 # SBoom (LAN) — Home Assistant Integration
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![Validate](https://github.com/dzerik/sboom_ha/actions/workflows/validate.yml/badge.svg)](https://github.com/dzerik/sboom_ha/actions/workflows/validate.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/dzerik/sboom_ha)](https://github.com/dzerik/sboom_ha/releases)
+[![Validate](https://github.com/TohaRG2/sboom_ha/actions/workflows/validate.yml/badge.svg)](https://github.com/TohaRG2/sboom_ha/actions/workflows/validate.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/TohaRG2/sboom_ha)](https://github.com/TohaRG2/sboom_ha/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Полностью локальное управление умными колонками класса SberBoom из Home Assistant. Никаких облачных токенов, никаких логинов в Sber-аккаунт. Связь с колонкой идёт по локальной сети (WSS на порту 20000), однократная авторизация — нажатием `+` на корпусе колонки.
