@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from .const import DOMAIN
 from .cover_client import fetch_cover
+from .helpers import track_identity_key
 
 if TYPE_CHECKING:
     import aiohttp
@@ -32,9 +33,7 @@ def _cover_key(track: TrackInfo) -> str | None:
     """
     if track.track_id:
         return None
-    if track.title and track.artists:
-        return f"{track.title}|{','.join(track.artists)}".lower()
-    return None
+    return track_identity_key(track)
 
 
 class CoverManager:
@@ -55,6 +54,9 @@ class CoverManager:
         self._key: str | None = None
         self._url: str | None = None
         self._inflight: set[str] = set()
+        # Ключ последнего запрошенного трека — поздние результаты для
+        # предыдущих треков отбрасываются (см. LyricsManager, аудит #33).
+        self._wanted: str | None = None
 
     def current_for(self, track: TrackInfo | None) -> str | None:
         """URL найденной обложки для текущего некаталожного трека, либо None."""
@@ -70,7 +72,10 @@ class CoverManager:
         if not track:
             return
         key = _cover_key(track)
-        if key is None or key == self._key or key in self._inflight:
+        if key is None:
+            return
+        self._wanted = key
+        if key == self._key or key in self._inflight:
             return
         self._inflight.add(key)
         self._entry.async_create_background_task(
@@ -84,6 +89,8 @@ class CoverManager:
             url = await fetch_cover(self._http, title, artist)
             if url is None:
                 return  # не нашли/ошибка — retry при следующем track-update
+            if self._wanted not in (None, key):
+                return  # трек уже сменился — стейл-обложку не пишем
             self._key = key
             self._url = url
             self._on_update()

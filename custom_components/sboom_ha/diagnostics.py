@@ -20,6 +20,10 @@ from .coordinator import SboomCoordinator
 # - токен — даёт control над колонкой
 # - host/serial/device_id — PII (идентификация устройства/сети пользователя)
 # - client_id — UUID клиента, может коррелировать запросы
+# - latitude/longitude/location_accuracy — точные координаты дома
+# - network_ip — адрес в LAN пользователя
+# - raw_state_json/raw — сырые payload'ы колонки: содержат все поля выше
+#   строкой, куда async_redact_data не заглядывает
 TO_REDACT = {
     "pin_access_token",
     "client_id",
@@ -28,6 +32,12 @@ TO_REDACT = {
     "client_host",  # coordinator snapshot — тот же PII, что и host
     "serial",
     "serial_number",
+    "latitude",
+    "longitude",
+    "location_accuracy",
+    "network_ip",
+    "raw_state_json",
+    "raw",
 }
 
 
@@ -41,13 +51,16 @@ def _safe_dataclass(obj: Any) -> Any:
 
 
 def _coordinator_snapshot(coord: SboomCoordinator) -> dict[str, Any]:
+    # last_update_success сознательно НЕ выгружается: контракт
+    # DataUpdateCoordinator обойдён (сбои полла глотаются, UpdateFailed не
+    # бросается) — поле всегда True и дезинформировало bug-report'ы.
+    # Честная доступность — coord.connected.
     return {
         "connected": coord.connected,
-        "last_update_success": coord.last_update_success,
         "update_interval_sec": (
             coord.update_interval.total_seconds() if coord.update_interval else None
         ),
-        "stopping": coord._stopping,
+        "stopping": coord.stopping,
         "lyrics_cache_size": len(coord.lyrics.by_track),
         "lyrics_inflight_count": coord.lyrics.inflight_count,
         "client_host": coord.client.host,

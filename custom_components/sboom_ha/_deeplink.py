@@ -15,7 +15,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -96,29 +95,16 @@ async def send_server_action(
 ) -> dict[int, Any] | str:
     """Отправить ServerAction и дождаться ответа колонки.
 
-    Корреляция — через ``client._pending``: регистрируем future по ``msg_id``,
-    listener (``SberSpeakerClient._listen_loop``) матчит входящий envelope по
-    ``field(2)`` и делает ``fut.set_result(raw_bytes)``.
+    Корреляция и сериализация отправки — через публичный
+    ``client.send_raw_request`` (инкапсулирует ``_ws``/``_pending``/``_lock``;
+    аудит #16 — раньше модуль лез в приватные внутренности клиента).
 
     Возвращает декодированное ``field(4)`` ответа — обычно ``{1: 'OK'}`` при
     успехе, либо строку (например, с ``ParseError``) при ошибке разбора.
     """
-    ws = client._ws
-    if ws is None:
-        raise RuntimeError("not connected")
-
     msg_id = str(uuid.uuid4())
     envelope = build_server_action(client, name, payload, msg_id)
-
-    fut: asyncio.Future = asyncio.get_running_loop().create_future()
-    client._pending[msg_id] = fut
-    try:
-        # Тот же lock, что сериализует все send() клиента.
-        async with client._lock:
-            await ws.send(envelope)
-        raw: bytes = await asyncio.wait_for(fut, timeout=timeout)
-    finally:
-        client._pending.pop(msg_id, None)
+    raw = await client.send_raw_request(envelope, msg_id, timeout=timeout)
 
     parsed = _decode_tlv(raw)
     # field(4) — ServerAction-ответ: {1: 'OK'} при успехе или строка при ошибке.

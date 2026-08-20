@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ._entity_base import SboomEntity
-from ._models import DeviceState
 from .coordinator import SboomCoordinator
 
 # Read-only сенсоры, данные из coordinator — параллелизм безразличен.
@@ -35,18 +34,13 @@ class SboomBinarySensorSpec:
     enabled_default: bool = True
 
 
-def _dev(c: SboomCoordinator) -> DeviceState | None:
-    """Подсистемы устройства из последнего GET_STATE, либо None."""
-    return c.state.device if c.state else None
-
-
 BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
     # LED-дисплей колонки включён.
     SboomBinarySensorSpec(
         key="led_display",
         translation_key="led_display",
         icon="mdi:television-ambient-light",
-        is_on_fn=lambda c: dev.led_on if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.led_on if (dev := c.device_state) else None,
     ),
     # Колонка активна (не в режиме сна).
     SboomBinarySensorSpec(
@@ -55,7 +49,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         device_class=BinarySensorDeviceClass.RUNNING,
         is_on_fn=lambda c: (
             None
-            if (dev := _dev(c)) is None or dev.sleep_state is None
+            if (dev := c.device_state) is None or dev.sleep_state is None
             else dev.sleep_state == "working"
         ),
     ),
@@ -64,7 +58,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         key="stereo_pair",
         translation_key="stereo_pair",
         icon="mdi:speaker-multiple",
-        is_on_fn=lambda c: dev.stereo_pair_active if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.stereo_pair_active if (dev := c.device_state) else None,
     ),
     # Устройство привязано к подписке.
     SboomBinarySensorSpec(
@@ -72,7 +66,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         translation_key="subscription_device",
         icon="mdi:card-account-details",
         entity_category=EntityCategory.DIAGNOSTIC,
-        is_on_fn=lambda c: dev.is_subscription_device if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.is_subscription_device if (dev := c.device_state) else None,
     ),
     # Режим домашней безопасности включён.
     SboomBinarySensorSpec(
@@ -80,7 +74,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         translation_key="home_security",
         icon="mdi:shield-home",
         entity_category=EntityCategory.DIAGNOSTIC,
-        is_on_fn=lambda c: dev.home_security if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.home_security if (dev := c.device_state) else None,
     ),
     # Идёт «утреннее шоу»; from_show (запущено из шоу) — в атрибутах.
     SboomBinarySensorSpec(
@@ -88,10 +82,10 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         translation_key="morning_show",
         icon="mdi:weather-sunset-up",
         entity_category=EntityCategory.DIAGNOSTIC,
-        is_on_fn=lambda c: dev.in_morning_show if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.in_morning_show if (dev := c.device_state) else None,
         attrs_fn=lambda c: (
             {"from_show": dev.morning_show_from}
-            if (dev := _dev(c)) and dev.morning_show_from is not None
+            if (dev := c.device_state) and dev.morning_show_from is not None
             else None
         ),
     ),
@@ -102,7 +96,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         translation_key="alarm_ringing",
         device_class=BinarySensorDeviceClass.SOUND,
         icon="mdi:alarm-bell",
-        is_on_fn=lambda c: dev.alarm_ringing if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.alarm_ringing if (dev := c.device_state) else None,
     ),
     # У текущего трека есть текст на стороне Sber (info.hasLyrics). Источник —
     # track, а не device_state.
@@ -119,7 +113,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         translation_key="assistant_auto_volume",
         icon="mdi:volume-vibrate",
         entity_category=EntityCategory.DIAGNOSTIC,
-        is_on_fn=lambda c: dev.assistant_auto_volume if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.assistant_auto_volume if (dev := c.device_state) else None,
     ),
     # Ассистент хочет проактивно что-то сообщить (proactivityNotification).
     SboomBinarySensorSpec(
@@ -127,7 +121,7 @@ BINARY_SENSOR_SPECS: tuple[SboomBinarySensorSpec, ...] = (
         translation_key="proactivity_notification",
         icon="mdi:message-badge",
         entity_category=EntityCategory.DIAGNOSTIC,
-        is_on_fn=lambda c: dev.proactivity_notification if (dev := _dev(c)) else None,
+        is_on_fn=lambda c: dev.proactivity_notification if (dev := c.device_state) else None,
     ),
 )
 

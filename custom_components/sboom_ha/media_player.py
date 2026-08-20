@@ -188,73 +188,65 @@ class SboomMediaPlayer(SboomEntity, MediaPlayerEntity):
 
     # ─────────────────── commands ───────────────────
     #
-    # Политика подтверждения: volume/mute не приходят push'ем, поэтому после
-    # команды состояние патчится optimistic + запрашивается debounced refresh.
-    # Play/pause/shuffle/repeat/seek колонка подтверждает push-событием почти
-    # мгновенно — им достаточно optimistic-патча без refresh.
+    # Политика подтверждения (optimistic-патч + когда нужен refresh) живёт
+    # в едином командном слое coordinator.async_execute (аудит #18) —
+    # entity лишь маппит HA-вызовы на action-имена.
 
     async def async_set_volume_level(self, volume: float) -> None:
         target = max(0, min(100, int(volume * 100)))
         await self._run_command(
-            self.coordinator.client.set_volume(target), action="set volume"
+            self.coordinator.async_execute("volume", target), action="set volume"
         )
-        self.coordinator.apply_optimistic_state(volume_percent=target)
-        await self.coordinator.async_request_refresh()
 
     async def async_volume_up(self) -> None:
         st = self.coordinator.state
+        # Optimistic-патч в async_execute гарантирует аккумуляцию повторных
+        # нажатий (3 × volume_up = +15, а не +5) в окне поллинга.
         cur = st.volume_percent if st and st.volume_percent is not None else 50
-        target = min(100, cur + 5)
         await self._run_command(
-            self.coordinator.client.set_volume(target), action="volume up"
+            self.coordinator.async_execute("volume", min(100, cur + 5)),
+            action="volume up",
         )
-        # Без optimistic-патча повторные нажатия в окне поллинга читали бы
-        # старую громкость и не аккумулировались (3 × volume_up = +5, а не +15).
-        self.coordinator.apply_optimistic_state(volume_percent=target)
-        await self.coordinator.async_request_refresh()
 
     async def async_volume_down(self) -> None:
         st = self.coordinator.state
         cur = st.volume_percent if st and st.volume_percent is not None else 50
-        target = max(0, cur - 5)
         await self._run_command(
-            self.coordinator.client.set_volume(target), action="volume down"
+            self.coordinator.async_execute("volume", max(0, cur - 5)),
+            action="volume down",
         )
-        self.coordinator.apply_optimistic_state(volume_percent=target)
-        await self.coordinator.async_request_refresh()
 
     async def async_media_play(self) -> None:
-        await self._run_command(self.coordinator.client.media_play(), action="play")
-        self.coordinator.apply_optimistic_track(playing=True)
+        await self._run_command(self.coordinator.async_execute("play"), action="play")
 
     async def async_media_pause(self) -> None:
-        await self._run_command(self.coordinator.client.media_pause(), action="pause")
-        self.coordinator.apply_optimistic_track(playing=False)
+        await self._run_command(self.coordinator.async_execute("pause"), action="pause")
 
     async def async_media_next_track(self) -> None:
-        await self._run_command(self.coordinator.client.media_next(), action="next track")
+        await self._run_command(self.coordinator.async_execute("next"), action="next track")
 
     async def async_media_previous_track(self) -> None:
-        await self._run_command(self.coordinator.client.media_prev(), action="previous track")
+        await self._run_command(
+            self.coordinator.async_execute("prev"), action="previous track"
+        )
 
     async def async_media_seek(self, position: float) -> None:
         await self._run_command(
-            self.coordinator.client.seek_to(int(position)), action="seek"
+            self.coordinator.async_execute("seek", int(position)), action="seek"
         )
 
     async def async_mute_volume(self, mute: bool) -> None:
-        cmd = self.coordinator.client.media_mute() if mute else self.coordinator.client.media_unmute()
-        await self._run_command(cmd, action="mute" if mute else "unmute")
-        self.coordinator.apply_optimistic_state(muted=mute)
-        await self.coordinator.async_request_refresh()
+        await self._run_command(
+            self.coordinator.async_execute("mute" if mute else "unmute"),
+            action="mute" if mute else "unmute",
+        )
 
     async def async_set_shuffle(self, shuffle: bool) -> None:
         await self._run_command(
-            self.coordinator.client.media_shuffle(shuffle), action="set shuffle"
+            self.coordinator.async_execute("shuffle", shuffle), action="set shuffle"
         )
-        self.coordinator.apply_optimistic_track(shuffle=shuffle)
 
     async def async_set_repeat(self, repeat: str) -> None:
         await self._run_command(
-            self.coordinator.client.media_repeat(repeat), action="set repeat"
+            self.coordinator.async_execute("repeat", repeat), action="set repeat"
         )

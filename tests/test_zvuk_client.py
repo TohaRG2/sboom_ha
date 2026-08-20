@@ -67,6 +67,37 @@ def test_build_deeplink_tid_vs_pid():
     )
 
 
+@pytest.mark.parametrize(
+    ("pt", "cid", "expected"),
+    [
+        ("track", "1", "staros://music?tid=1&pt=track"),
+        ("podcast", "2", "staros://music?tid=2&pt=podcast"),
+        ("artist", "3", "staros://music?pid=3&pt=artist"),
+        ("release", "4", "staros://music?pid=4&pt=release"),
+        ("playlist", "5", "staros://music?pid=5&pt=playlist"),
+    ],
+)
+def test_deeplink_for_valid(pt, cid, expected):
+    assert ZvukClient.deeplink_for(pt, cid) == expected
+
+
+@pytest.mark.parametrize(
+    ("pt", "cid"),
+    [
+        ("track", "1&foo=bar"),  # инъекция query-параметров через id
+        ("track&x=y", "1"),  # инъекция через pt
+        ("track", "abc"),  # нечисловой id
+        ("evil", "1"),  # pt вне whitelist
+        ("", "1"),
+        ("track", ""),
+        (None, "1"),
+        ("track", None),
+    ],
+)
+def test_deeplink_for_rejects_invalid(pt, cid):
+    assert ZvukClient.deeplink_for(pt, cid) is None
+
+
 def test_search_item_subtitle_by_type():
     from sboom_ha.zvuk_client import ZvukClient as Z
 
@@ -218,12 +249,192 @@ async def test_dominant_cover_color_cached():
         respx.get(PROFILE).mock(
             return_value=httpx.Response(200, json={"result": {"token": "T"}})
         )
-        img = respx.get("https://cdn/cover.png").mock(
+        img = respx.get("https://cdn-image.zvuk.com/cover.png").mock(
             return_value=httpx.Response(200, content=_png_bytes((30, 180, 90)))
         )
         client = ZvukClient()
-        c1 = await client.dominant_cover_color("https://cdn/cover.png")
-        c2 = await client.dominant_cover_color("https://cdn/cover.png")
+        c1 = await client.dominant_cover_color("https://cdn-image.zvuk.com/cover.png")
+        c2 = await client.dominant_cover_color("https://cdn-image.zvuk.com/cover.png")
         await client.aclose()
     assert c1 == c2 and c1.startswith("#")
     assert img.call_count == 1  # кеш по URL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://cdn-image.zvuk.com/cover.png",  # не-https
+        "https://169.254.169.254/latest/meta-data",  # SSRF: metadata endpoint
+        "https://192.168.1.1/admin",  # SSRF: LAN
+        "https://evil.example/cover.png",  # чужой хост
+        "https://zvuk.com.evil.example/x.png",  # суффикс-спуфинг
+        "ftp://cdn-image.zvuk.com/cover.png",
+    ],
+)
+async def test_dominant_cover_color_rejects_disallowed_url(url):
+    """URL вне allowlist (или не-https) отклоняется без единого запроса."""
+    async with respx.mock:  # без маршрутов: любой запрос упадёт с ошибкой мока
+        client = ZvukClient()
+        assert await client.dominant_cover_color(url) is None
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://cdn-image.zvuk.com/pic?type=release&id=1&size=400x400",
+        "https://is1-ssl.mzstatic.com/image/thumb/a/600x600bb.jpg",  # iTunes
+        "https://e-cdns-images.dzcdn.net/images/cover/x/1000x1000-000000-80-0-0.jpg",  # Deezer
+    ],
+)
+async def test_dominant_cover_color_allows_known_cover_hosts(url):
+    async with respx.mock:
+        respx.get(url).mock(
+            return_value=httpx.Response(200, content=_png_bytes((30, 180, 90)))
+        )
+        client = ZvukClient()
+        color = await client.dominant_cover_color(url)
+        await client.aclose()
+    assert color is not None and color.startswith("#")
+
+
+@pytest.mark.asyncio
+async def test_dominant_cover_color_network_error_not_cached():
+    """Сетевая ошибка ≠ not_found: после сбоя повторный вызов идёт в сеть."""
+    url = "https://cdn-image.zvuk.com/cover.png"
+    async with respx.mock:
+        img = respx.get(url).mock(
+            side_effect=[
+                httpx.ConnectError("boom"),
+                httpx.Response(200, content=_png_bytes((30, 180, 90))),
+            ]
+        )
+        client = ZvukClient()
+        assert await client.dominant_cover_color(url) is None
+        c2 = await client.dominant_cover_color(url)
+        await client.aclose()
+    assert c2 is not None and c2.startswith("#")
+    assert img.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_dominant_cover_color_oversized_body_rejected():
+    """Тело больше лимита не скармливается Pillow и даёт None."""
+    from sboom_ha.zvuk_client import _MAX_COVER_BYTES
+
+    url = "https://cdn-image.zvuk.com/huge.png"
+    async with respx.mock:
+        respx.get(url).mock(
+            return_value=httpx.Response(200, content=b"x" * (_MAX_COVER_BYTES + 1))
+        )
+        client = ZvukClient()
+        assert await client.dominant_cover_color(url) is None
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_dominant_cover_color_cache_bounded():
+    """Кэш цветов ограничен: произвольные URL не раздувают память."""
+    from sboom_ha.zvuk_client import _COLOR_CACHE_MAX
+
+    png = _png_bytes((30, 180, 90))
+    async with respx.mock:
+        respx.get(url__startswith="https://cdn-image.zvuk.com/").mock(
+            return_value=httpx.Response(200, content=png)
+        )
+        client = ZvukClient()
+        for i in range(_COLOR_CACHE_MAX + 20):
+            await client.dominant_cover_color(
+                f"https://cdn-image.zvuk.com/pic?id={i}"
+            )
+        assert len(client._color_cache) <= _COLOR_CACHE_MAX
+        await client.aclose()
+
+
+# ────────────────── 401 → retry с force-токеном (аудит #6) ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_graphql_retries_with_fresh_token_after_401():
+    """Протухший анонимный токен: один retry с get_token(force=True)."""
+    async with respx.mock:
+        profile = respx.get(PROFILE).mock(
+            side_effect=[
+                httpx.Response(200, json={"result": {"token": "OLD"}}),
+                httpx.Response(200, json={"result": {"token": "NEW"}}),
+            ]
+        )
+        gql = respx.post(GRAPHQL).mock(
+            side_effect=[
+                httpx.Response(401),
+                httpx.Response(200, json={"data": {"getTracks": [
+                    {"id": "1", "title": "T", "artists": [], "release": {}}
+                ]}}),
+            ]
+        )
+        client = ZvukClient()
+        tracks = await client.get_tracks(["1"])
+        await client.aclose()
+    assert len(tracks) == 1 and tracks[0]["title"] == "T"
+    assert profile.call_count == 2  # второй раз — force
+    assert gql.call_count == 2
+    assert gql.calls[1].request.headers["X-Auth-Token"] == "NEW"
+
+
+@pytest.mark.asyncio
+async def test_search_retries_with_fresh_token_after_401():
+    empty_search = {"result": {"search": {
+        "best_item": None,
+        "artists": {"items": []}, "releases": {"items": []},
+        "tracks": {"items": []}, "playlists": {"items": []},
+    }}}
+    async with respx.mock:
+        profile = respx.get(PROFILE).mock(
+            side_effect=[
+                httpx.Response(200, json={"result": {"token": "OLD"}}),
+                httpx.Response(200, json={"result": {"token": "NEW"}}),
+            ]
+        )
+        search = respx.get(SEARCH).mock(
+            side_effect=[
+                httpx.Response(401),
+                httpx.Response(200, json=empty_search),
+            ]
+        )
+        client = ZvukClient()
+        res = await client.search("Летов")
+        await client.aclose()
+    assert res["tracks"] == [] and res["best"] is None  # не «ошибка», а результат
+    assert profile.call_count == 2
+    assert search.call_count == 2
+    assert search.calls[1].request.headers["X-Auth-Token"] == "NEW"
+
+
+# ────────────────── kind=podcast (аудит #8) ─────────────────────────────────
+
+
+def test_parse_zvuk_url_bare_id_kind_podcast():
+    """Схема сервиса разрешает kind=podcast — маппинг обязан его знать."""
+    assert ZvukClient.parse_zvuk_url("55", kind="podcast") == (
+        "podcast",
+        "tid",
+        "55",
+    )
+
+
+# ────────── get_token внутри контракта «ошибка → пусто» (аудит #22) ──────────
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_when_token_endpoint_down():
+    """Недоступность zvuk.com на этапе токена не пробивает контракт
+    «ошибка → пустой результат» сырым httpx-исключением."""
+    async with respx.mock:
+        respx.get(PROFILE).mock(side_effect=httpx.ConnectError("down"))
+        client = ZvukClient()
+        res = await client.search("Летов")
+        await client.aclose()
+    assert res == {"best": None, "artists": [], "releases": [],
+                   "tracks": [], "playlists": []}

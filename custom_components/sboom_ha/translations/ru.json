@@ -329,7 +329,7 @@
         },
         "url": {
           "name": "Ссылка",
-          "description": "Ссылка zvuk.com (напр. https://zvuk.com/track/84279897)."
+          "description": "Ссылка zvuk.com на трек, альбом, исполнителя или плейлист."
         },
         "query": {
           "name": "Запрос",

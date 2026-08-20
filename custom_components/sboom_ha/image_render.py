@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import os
-import re
+import textwrap
 from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -42,8 +42,12 @@ def _layout_text(
     многострочных текстах). Логика уменьшения шрифта при переполнении —
     исторически из _draw_text.
     """
-    lines = re.findall(rf"(.{{1,{line_width}}})(?:\s|$)", text)
-    if (font_size > 70 and len(lines) > 3) or (font_size <= 70 and len(lines) > 4):
+    # break_long_words: текст без пробелов (CJK-лирика, длинные слова)
+    # режется по ширине, а не отбрасывается.
+    lines = textwrap.wrap(text, width=line_width, break_long_words=True) or [""]
+    overflow = (font_size > 70 and len(lines) > 3) or (font_size <= 70 and len(lines) > 4)
+    # Нижняя граница рекурсии: шрифт не уходит в ≤0 (ValueError из PIL).
+    if overflow and font_size - 10 >= 12:
         return _layout_text(text, box, anchor, font_size - 10, line_width + 3)
 
     if anchor[0] == "l":
@@ -107,39 +111,6 @@ def _karaoke_line_fills(lines: list[str], frac: float) -> list[float]:
             fills.append(done / len(line))
             done = 0.0
     return fills
-
-
-def draw_cover(title: str | None, artist: str | None, cover: bytes | None) -> bytes:
-    """Cover (опц.) + title + artist на чёрном фоне."""
-    canvas = Image.new("RGB", (WIDTH, HEIGHT))
-    if cover:
-        try:
-            img = Image.open(io.BytesIO(cover)).convert("RGB")
-            img = img.resize((COVER_BOX, COVER_BOX))
-            canvas.paste(img, (WIDTH2 - COVER_BOX // 2, HEIGHT6 * 2 - COVER_BOX // 2))
-        except Exception:
-            pass
-    ctx = ImageDraw.Draw(canvas)
-    if title:
-        _draw_text(ctx, title, (0, HEIGHT6 * 4, WIDTH, HEIGHT6), "mb", "white", 60, 35)
-    if artist:
-        _draw_text(ctx, artist, (0, HEIGHT6 * 5, WIDTH, HEIGHT6), "mt", "grey", 50, 40)
-    buf = io.BytesIO()
-    canvas.save(buf, format="JPEG", quality=75)
-    return buf.getvalue()
-
-
-def draw_lyrics(first: str | None, second: str | None) -> bytes:
-    """Текущая (большая, белая) + следующая (меньше, серая) строки."""
-    canvas = Image.new("RGB", (WIDTH, HEIGHT))
-    ctx = ImageDraw.Draw(canvas)
-    if first:
-        _draw_text(ctx, first, (0, 50, WIDTH, HEIGHT2 - 50), "mm", "white", 100)
-    if second:
-        _draw_text(ctx, second, (0, HEIGHT2, WIDTH, HEIGHT2 - 50), "mm", "grey", 100)
-    buf = io.BytesIO()
-    canvas.save(buf, format="JPEG", quality=75)
-    return buf.getvalue()
 
 
 def draw_blank() -> bytes:
@@ -290,6 +261,47 @@ def _format_time(sec: float | None) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
+def _draw_frame_chrome(
+    ctx: ImageDraw.ImageDraw,
+    source: str | None,
+    title: str | None,
+    artist: str | None,
+    position_sec: float | None,
+    duration_sec: float | None,
+    progress: float | None,
+    *,
+    title_size: int,
+    title_width: int,
+    artist_size: int,
+    artist_width: int,
+) -> None:
+    """Общий «хром» кадра: плашка source, футер title/artist, время, progress.
+
+    Единственный источник для караоке- и idle-кадров (аудит #45): размеры
+    шрифтов различаются между режимами и передаются параметрами.
+    """
+    if source:
+        _draw_text(ctx, source, (0, 24, WIDTH, 40), "mt", (170, 170, 175), 28, line_width=60)
+    if title:
+        _draw_text(
+            ctx, title,
+            (0, HEIGHT - 165, WIDTH, 60),
+            "mb", "white", title_size, line_width=title_width,
+        )
+    if artist:
+        _draw_text(
+            ctx, artist,
+            (0, HEIGHT - 95, WIDTH, 40),
+            "mt", (190, 190, 190), artist_size, line_width=artist_width,
+        )
+    if position_sec is not None or duration_sec is not None:
+        font = _font(22)
+        ctx.text((40, HEIGHT - 38), _format_time(position_sec), font=font, fill=(220, 220, 220))
+        ctx.text((WIDTH - 40, HEIGHT - 38), _format_time(duration_sec),
+                 anchor="ra", font=font, fill=(220, 220, 220))
+    _draw_progress(ctx, progress)
+
+
 def draw_lyrics_with_cover(
     cover: bytes | None,
     current: str | None,
@@ -311,10 +323,6 @@ def draw_lyrics_with_cover(
     canvas = _make_blur_bg(cover)
     ctx = ImageDraw.Draw(canvas)
 
-    # Плашка источника вверху по центру (приглушённая, малым шрифтом).
-    if source:
-        _draw_text(ctx, source, (0, 24, WIDTH, 40), "mt", (170, 170, 175), 28, line_width=60)
-
     # Lyrics верх — две строки в верхних 2/3 экрана.
     if current:
         cur_box = (40, HEIGHT // 6, WIDTH - 80, HEIGHT // 3)
@@ -329,26 +337,10 @@ def draw_lyrics_with_cover(
             "mm", (210, 210, 210), 70, line_width=26,
         )
 
-    # Footer: title + artist + время позиции/длительности.
-    if title:
-        _draw_text(
-            ctx, title,
-            (0, HEIGHT - 165, WIDTH, 60),
-            "mb", "white", 46, line_width=40,
-        )
-    if artist:
-        _draw_text(
-            ctx, artist,
-            (0, HEIGHT - 95, WIDTH, 40),
-            "mt", (190, 190, 190), 32, line_width=50,
-        )
-    # время слева/справа над progress-bar
-    if position_sec is not None or duration_sec is not None:
-        font = _font(22)
-        ctx.text((40, HEIGHT - 38), _format_time(position_sec), font=font, fill=(220, 220, 220))
-        ctx.text((WIDTH - 40, HEIGHT - 38), _format_time(duration_sec),
-                 anchor="ra", font=font, fill=(220, 220, 220))
-    _draw_progress(ctx, progress)
+    _draw_frame_chrome(
+        ctx, source, title, artist, position_sec, duration_sec, progress,
+        title_size=46, title_width=40, artist_size=32, artist_width=50,
+    )
 
     buf = io.BytesIO()
     canvas.save(buf, format="JPEG", quality=80)
@@ -375,18 +367,10 @@ def draw_cover_yandex(
         except Exception:
             pass
     ctx = ImageDraw.Draw(canvas)
-    if source:
-        _draw_text(ctx, source, (0, 24, WIDTH, 40), "mt", (170, 170, 175), 28, line_width=60)
-    if title:
-        _draw_text(ctx, title, (0, HEIGHT - 165, WIDTH, 60), "mb", "white", 50, 35)
-    if artist:
-        _draw_text(ctx, artist, (0, HEIGHT - 95, WIDTH, 40), "mt", (190, 190, 190), 36, 45)
-    if position_sec is not None or duration_sec is not None:
-        font = _font(22)
-        ctx.text((40, HEIGHT - 38), _format_time(position_sec), font=font, fill=(220, 220, 220))
-        ctx.text((WIDTH - 40, HEIGHT - 38), _format_time(duration_sec),
-                 anchor="ra", font=font, fill=(220, 220, 220))
-    _draw_progress(ctx, progress)
+    _draw_frame_chrome(
+        ctx, source, title, artist, position_sec, duration_sec, progress,
+        title_size=50, title_width=35, artist_size=36, artist_width=45,
+    )
     buf = io.BytesIO()
     canvas.save(buf, format="JPEG", quality=80)
     return buf.getvalue()

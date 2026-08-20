@@ -471,3 +471,33 @@ async def test_netease_strips_credit_lines():
     assert result.timeline[0] == (12.0, "Границы ключ переломлен пополам")
     assert "作曲" not in (result.synced or "")
     assert "作曲" not in (result.plain or "")
+
+
+# ────────── битый 200-ответ Lrclib: JSON-мусор ≠ crash (аудит #23) ──────────
+
+
+@pytest.mark.asyncio
+async def test_fetch_lyrics_invalid_json_body_treated_as_network_error():
+    """200 + невалидный JSON — это сетевая аномалия (None → retry позже),
+    а не необработанное исключение в background-task."""
+    resp = MagicMock()
+    resp.status = 200
+    resp.json = AsyncMock(side_effect=ValueError("Expecting value"))
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=resp)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(return_value=ctx)
+    result = await fetch_lyrics(session, "Track", "Artist", retries=1,
+                                use_netease=False)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_lyrics_json_array_body_treated_as_network_error():
+    """200 + JSON-массив вместо объекта: без isinstance-проверки это был
+    AttributeError на data.get()."""
+    session = _mock_session_response(200, ["not", "a", "dict"])
+    result = await fetch_lyrics(session, "Track", "Artist", retries=1,
+                                use_netease=False)
+    assert result is None

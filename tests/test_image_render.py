@@ -349,3 +349,40 @@ def test_fallback_cover_renders_non_black_background():
     img = Image.open(io.BytesIO(frame)).convert("RGB")
     # хоть один пиксель заметно цветной/светлее near-black (15,15,18)
     assert any(sum(px) > 90 for px in img.getdata())
+
+
+# ────────────────── _layout_text: перенос и граница шрифта (аудит #10/#11) ──
+
+
+def test_layout_text_no_spaces_keeps_all_characters():
+    """Текст без пробелов (CJK-лирика) не должен терять начало строки."""
+    from sboom_ha.image_render import _layout_text
+
+    text = "あ" * 60
+    lines, _x, _align, _y, _size = _layout_text(text, (0, 0, WIDTH, HEIGHT), "mm", 90, 22)
+    assert sum(len(line) for line in lines) == 60
+
+
+def test_layout_text_long_ascii_word_not_truncated():
+    """Одно 'слово' длиннее line_width режется, а не отбрасывается."""
+    from sboom_ha.image_render import _layout_text
+
+    text = "a" * 300
+    lines, _x, _align, _y, size = _layout_text(text, (0, 0, WIDTH, HEIGHT), "mm", 90, 22)
+    assert sum(len(line) for line in lines) == 300
+    assert size >= 12
+
+
+def test_layout_text_font_size_bounded_below():
+    """Рекурсия уменьшения шрифта не уходит в size <= 0 (ValueError из PIL)."""
+    from sboom_ha.image_render import _layout_text
+
+    text = "слово " * 60
+    _lines, _x, _align, _y, size = _layout_text(text, (0, 0, WIDTH, HEIGHT), "mm", 90, 22)
+    assert size >= 12
+
+
+def test_draw_lyrics_with_cover_survives_very_long_text():
+    """Полный рендер с текстом-простынёй не кидает ValueError."""
+    jpeg = draw_lyrics_with_cover(None, "слово " * 60, "и ещё " * 60, "t", "a")
+    assert _is_valid_jpeg(jpeg)

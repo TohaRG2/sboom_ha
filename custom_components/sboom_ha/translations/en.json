@@ -329,7 +329,7 @@
         },
         "url": {
           "name": "Link",
-          "description": "zvuk.com link (e.g. https://zvuk.com/track/84279897)."
+          "description": "A zvuk.com track, album, artist or playlist link."
         },
         "query": {
           "name": "Query",

@@ -6,6 +6,7 @@ import json
 import logging
 import random
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -19,11 +20,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from ._parsers import track_from_state
 from .api import BluetoothDevice, SberSpeakerClient, SpeakerState, TrackInfo
-from .cli4242 import Cli4242Client, MatterDevice, ZigbeeDevice
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_NAME,
-    CONF_DEVICE_ID,
     CONF_HOST,
     CONF_PIN_ACCESS_TOKEN,
     CONF_PORT,
@@ -51,7 +50,8 @@ from .const import (
     STABLE_SESSION_SEC,
 )
 from .cover_manager import CoverManager
-from .iio_client import IioCapability, IioClient, IioReading
+from .helpers import sber_device_id
+from .hw_monitor import HwMonitor
 from .lyrics_client import Lyrics
 from .lyrics_manager import LyricsManager
 
@@ -65,6 +65,43 @@ EVENT_CONNECTION_CHANGED = "sboom_connection_changed"
 UNREACHABLE_ISSUE_THRESHOLD_SEC = 300  # 5 минут
 
 _LOGGER = logging.getLogger(__name__)
+
+# Единый командный слой (аудит #18): action → (метод клиента, тип value).
+# Используется media_player/switch/number/select и ws-командами панели.
+COMMAND_SPECS: dict[str, tuple[str, str | None]] = {
+    "play": ("media_play", None),
+    "pause": ("media_pause", None),
+    "next": ("media_next", None),
+    "prev": ("media_prev", None),
+    "previous": ("media_prev", None),
+    "mute": ("media_mute", None),
+    "unmute": ("media_unmute", None),
+    "like": ("media_like", None),
+    "remove_like": ("media_remove_like", None),
+    "dislike": ("media_dislike", None),
+    "remove_dislike": ("media_remove_dislike", None),
+    "find_remote": ("find_remote", None),
+    "volume": ("set_volume", "int"),
+    "seek": ("seek_to", "int"),
+    "shuffle": ("media_shuffle", "bool"),
+    "repeat": ("media_repeat", "str"),
+    "playback_speed": ("set_playback_speed", "float"),
+}
+
+# Volume/mute НЕ приходят push'ем — после команды нужен debounced refresh
+# для подтверждения. Остальное колонка подтверждает push-событием.
+_REFRESH_ACTIONS = frozenset({"volume", "mute", "unmute"})
+
+
+def _coerce_value(kind: str, value: Any) -> Any:
+    """Привести value из JSON/сервиса к типу, ожидаемому методом клиента."""
+    if kind == "int":
+        return int(value)
+    if kind == "float":
+        return float(value)
+    if kind == "bool":
+        return bool(value)
+    return str(value)
 
 
 class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -122,24 +159,24 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unreachable_since: float | None = None  # monotonic timestamp
         self._supervisor_task: asyncio.Task | None = None
         self._stopping = False
+        # Подписчики на остановку координатора (unload/reload entry) —
+        # напр. push-подписка панели, которой нужно терминальное событие,
+        # чтобы переподписаться на новый инстанс (аудит #32).
+        self._stop_listeners: list[Callable[[], None]] = []
 
-        # Аппаратные датчики (libiio) и Zigbee-инвентарь (debug-CLI) — есть
-        # только у некоторых моделей (R2). Capability определяется при старте;
-        # если недоступно — соответствующие сенсоры не создаются.
-        host = entry.data[CONF_HOST]
-        self._iio_client = IioClient(host)
-        self._cli = Cli4242Client(host)
-        self.iio_cap: IioCapability = IioCapability()
-        self.has_zigbee_cli: bool = False
-        self.has_matter_cli: bool = False
-        self.iio_reading: IioReading = IioReading()
-        self.zigbee_devices: list[ZigbeeDevice] = []
-        self.matter_devices: list[MatterDevice] = []
-        self.matter_raw: str = ""
-        self._hw_poll_tick = 0
+        # Аппаратная подсистема (libiio-датчики + Zigbee/Matter CLI) вынесена
+        # в HwMonitor (SRP, аудит #20) — есть только у части моделей (R2).
+        # Сенсоры читают её через coordinator.hw.*; поля-делегаты ниже — для
+        # обратной совместимости старого доступа coordinator.iio_cap и т.п.
+        self.hw = HwMonitor(entry.data[CONF_HOST])
         # Подряд идущие полностью неудачные poll-циклы при живом на вид сокете —
         # страховка от half-open, который не поймал транспортный WS ping.
         self._poll_failures = 0
+        # Generation-счётчик мутаций state/track из push/optimistic-путей.
+        # Poll снимает снапшот перед await и отбрасывает свой ответ, если
+        # счётчик изменился: ответ сформирован ДО более свежих данных
+        # (last-write-wins гонка — аудит #5).
+        self._mutations = 0
 
         self._http = async_get_clientsession(hass)
         # Жизненный цикл текстов песен — в отдельном менеджере (SRP).
@@ -158,6 +195,20 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def http_session(self):
         """Shared aiohttp session — для подплатформ (camera/sensor)."""
         return self._http
+
+    @property
+    def device_state(self):
+        """Подсистемы устройства из последнего GET_STATE, либо None.
+
+        Единственный источник для sensor/binary_sensor/_entity_base —
+        вместо трёх локальных копий `_dev()` (аудит #46).
+        """
+        return self.state.device if self.state else None
+
+    @property
+    def stopping(self) -> bool:
+        """True во время unload/reload entry (публичный доступ для diagnostics)."""
+        return self._stopping
 
     # ─────────────────────── lifecycle ───────────────────────
 
@@ -190,44 +241,60 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _probe_hw_capabilities(self) -> None:
-        """Один раз при старте: есть ли у этой модели libiio-датчики и
-        Zigbee-CLI. Определяет, какие «железные» сенсоры будут созданы."""
-        try:
-            self.iio_cap, self.has_zigbee_cli, self.has_matter_cli = await asyncio.gather(
-                self._iio_client.async_probe(),
-                self._cli.async_probe(),
-                self._cli.async_matter_probe(),
-            )
-        except Exception as exc:
-            _LOGGER.debug("hw capability probe failed: %s", exc)
-            return
-        _LOGGER.debug(
-            "hw capabilities: illuminance=%s thermal=%s zigbee_cli=%s matter_cli=%s",
-            self.iio_cap.has_illuminance, self.iio_cap.has_thermal,
-            self.has_zigbee_cli, self.has_matter_cli,
-        )
-        if self.iio_cap.any:
-            self.iio_reading = await self._iio_client.async_read(self.iio_cap)
-        if self.has_zigbee_cli:
-            self.zigbee_devices = await self._cli.async_list_devices() or []
-        if self.has_matter_cli:
-            await self._poll_matter()
+        """Один раз при старте: определить аппаратные capability модели."""
+        await self.hw.async_probe()
 
-    async def _poll_hw(self) -> None:
-        """Опрос аппаратных датчиков/Zigbee. libiio — каждый тик (дёшево),
-        Zigbee-инвентарь — реже (открывает CLI-сессию, меняется медленно)."""
-        if self.iio_cap.any:
-            self.iio_reading = await self._iio_client.async_read(self.iio_cap)
-        if self.has_zigbee_cli and self._hw_poll_tick % 20 == 0:
-            self.zigbee_devices = await self._cli.async_list_devices() or []
-        if self.has_matter_cli and self._hw_poll_tick % 20 == 0:
-            await self._poll_matter()
-        self._hw_poll_tick += 1
+    # ─────────────── hw-делегаты (обратная совместимость) ───────────────
+    # Сенсоры и тесты читают/пишут coordinator.iio_cap и т.п.; фактическое
+    # состояние живёт в HwMonitor (аудит #20).
 
-    async def _poll_matter(self) -> None:
-        res = await self._cli.async_matter_list()
-        if res is not None:
-            self.matter_devices, self.matter_raw = res
+    @property
+    def iio_cap(self):
+        return self.hw.iio_cap
+
+    @iio_cap.setter
+    def iio_cap(self, value) -> None:
+        self.hw.iio_cap = value
+
+    @property
+    def iio_reading(self):
+        return self.hw.iio_reading
+
+    @iio_reading.setter
+    def iio_reading(self, value) -> None:
+        self.hw.iio_reading = value
+
+    @property
+    def has_zigbee_cli(self) -> bool:
+        return self.hw.has_zigbee_cli
+
+    @has_zigbee_cli.setter
+    def has_zigbee_cli(self, value: bool) -> None:
+        self.hw.has_zigbee_cli = value
+
+    @property
+    def has_matter_cli(self) -> bool:
+        return self.hw.has_matter_cli
+
+    @has_matter_cli.setter
+    def has_matter_cli(self, value: bool) -> None:
+        self.hw.has_matter_cli = value
+
+    @property
+    def zigbee_devices(self):
+        return self.hw.zigbee_devices
+
+    @zigbee_devices.setter
+    def zigbee_devices(self, value) -> None:
+        self.hw.zigbee_devices = value
+
+    @property
+    def matter_devices(self):
+        return self.hw.matter_devices
+
+    @matter_devices.setter
+    def matter_devices(self, value) -> None:
+        self.hw.matter_devices = value
 
     async def _connect_and_sync(self) -> None:
         """Один connect + listener + стартовый sync. Бросает исключение при неудаче.
@@ -247,8 +314,26 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("connected to %s", self.client.host)
         await self._refresh_state_and_track()
 
+    def async_add_stop_listener(
+        self, listener: Callable[[], None]
+    ) -> Callable[[], None]:
+        """Подписаться на остановку координатора. Возвращает unsubscribe."""
+        self._stop_listeners.append(listener)
+
+        def _remove() -> None:
+            if listener in self._stop_listeners:
+                self._stop_listeners.remove(listener)
+
+        return _remove
+
     async def async_stop(self) -> None:
         self._stopping = True
+        for listener in list(self._stop_listeners):
+            try:
+                listener()
+            except Exception:
+                _LOGGER.exception("stop-listener координатора упал")
+        self._stop_listeners.clear()
         self._set_connected(False)
         if self._supervisor_task:
             self._supervisor_task.cancel()
@@ -342,7 +427,63 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.lyrics.maybe_fetch(self.track)
         self.cover.maybe_fetch(self.track)
 
+    # ─────────────────────── единый командный слой ───────────────────────
+
+    async def async_execute(self, action: str, value: Any = None) -> None:
+        """Выполнить команду к колонке: вызов клиента + optimistic-патч + refresh.
+
+        Единственное место с политикой подтверждения команд (аудит #18):
+        entity-платформы и ws-команды панели — тонкие адаптеры. ValueError —
+        неизвестный action или отсутствующее/некорректное value.
+        """
+        spec = COMMAND_SPECS.get(action)
+        if spec is None:
+            raise ValueError(f"unknown action: {action}")
+        method_name, value_kind = spec
+        if value_kind is not None:
+            if value is None:
+                raise ValueError(f"{action} requires value")
+            value = _coerce_value(value_kind, value)
+        method = getattr(self.client, method_name)
+        if value_kind is None:
+            await method()
+        else:
+            await method(value)
+        self._apply_optimistic_for(action, value)
+        if action in _REFRESH_ACTIONS:
+            await self.async_request_refresh()
+
+    def _apply_optimistic_for(self, action: str, value: Any) -> None:
+        """Optimistic-патч состояния после успешной команды.
+
+        next/prev/seek/find_remote — без патча: трек/позиция придут push'ем.
+        """
+        if action == "play":
+            self.apply_optimistic_track(playing=True)
+        elif action == "pause":
+            self.apply_optimistic_track(playing=False)
+        elif action == "like":
+            self.apply_optimistic_track(liked=True)
+        elif action in ("remove_like", "dislike"):
+            self.apply_optimistic_track(liked=False)
+        elif action == "mute":
+            self.apply_optimistic_state(muted=True)
+        elif action == "unmute":
+            self.apply_optimistic_state(muted=False)
+        elif action == "volume" and value is not None:
+            self.apply_optimistic_state(volume_percent=int(value))
+        elif action == "shuffle" and value is not None:
+            self.apply_optimistic_track(shuffle=bool(value))
+        elif action == "repeat" and value is not None:
+            self.apply_optimistic_track(repeat=str(value))
+        elif action == "playback_speed" and value is not None:
+            self.apply_optimistic_track(playback_speed=float(value))
+
     # ─────────────────────── optimistic updates ───────────────────────
+
+    def _bump_mutations(self) -> None:
+        """Отметить push/optimistic-мутацию state/track (см. `_mutations`)."""
+        self._mutations += 1
 
     def apply_optimistic_state(self, **changes: Any) -> None:
         """Локально патчит SpeakerState сразу после успешной команды.
@@ -354,6 +495,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.state is None:
             return
         self.state = replace(self.state, **changes)
+        self._bump_mutations()
         self.async_update_listeners()
 
     def apply_optimistic_track(self, **changes: Any) -> None:
@@ -361,6 +503,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.track is None:
             return
         self.track = replace(self.track, **changes)
+        self._bump_mutations()
         self.async_update_listeners()
 
     # ─────────────────────── data handlers ───────────────────────
@@ -414,6 +557,22 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             track.received_ts = time.time()
         return track
 
+    def _maybe_update_track_from_state(self) -> None:
+        """Пересобрать now-playing из свежего GET_STATE (push-путь).
+
+        Смена песни по Bluetooth/радио приходит push'ем GET_STATE (metadata-push
+        для них не бывает — нет trackId); без пересборки title/artist ждали бы
+        следующего volume-poll'а. Каталожный трек не затирается: его обновляет
+        OP_GET_META_DATA, state-производный принимается только если играет
+        (реальное переключение источника на BT/радио).
+        """
+        derived = self._track_from_current_state()
+        if derived is None or derived.track_id:
+            return
+        if self.track is None or not self.track.track_id or derived.playing:
+            self.track = self._stamp_track(derived)
+            self._maybe_fetch_lyrics()
+
     def _track_from_current_state(self) -> TrackInfo | None:
         """Now-playing из последнего GET_STATE (радио/Bluetooth — без trackId)."""
         if not self.state or not self.state.raw_state_json:
@@ -428,41 +587,53 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         prev_track = self.track
         prev_state = self.state
         poll_ok = False
+        gen = self._mutations
         try:
-            self.state = self._merge_state(await self.client.get_state())
+            new_state = await self.client.get_state()
             poll_ok = True
-            _LOGGER.debug("get_state -> volume=%s muted=%s",
-                          self.state.volume_percent if self.state else "?",
-                          self.state.muted if self.state else "?")
+            if self._mutations == gen:
+                self.state = self._merge_state(new_state)
+                _LOGGER.debug("get_state -> volume=%s muted=%s",
+                              self.state.volume_percent if self.state else "?",
+                              self.state.muted if self.state else "?")
+            else:
+                # Во время await пришёл push/optimistic — ответ сформирован
+                # до него и уже стейл. Следующий poll подтвердит.
+                _LOGGER.debug("get_state отброшен: state изменился во время await")
         except Exception as exc:
             # Обрыв в процессе poll'а — штатно, супервизор реконнектит.
             _LOGGER.debug("get_state failed: %s", exc)
+        gen = self._mutations
         try:
-            self.track = self._stamp_track(await self.client.get_metadata())
+            new_track = await self.client.get_metadata()
             poll_ok = True
-            self._maybe_fetch_lyrics()
-            if self.track:
-                _LOGGER.debug(
-                    "get_metadata -> title=%r artists=%s album=%r track_id=%s "
-                    "release_id=%s playing=%s pos=%s/%s prov=%s",
-                    self.track.title, self.track.artists, self.track.album,
-                    self.track.track_id, self.track.release_id,
-                    self.track.playing, self.track.position_sec,
-                    self.track.duration_sec, self.track.provider,
-                )
+            if self._mutations != gen:
+                _LOGGER.debug("get_metadata отброшен: track изменился во время await")
             else:
-                # get_metadata пуст (радио/Bluetooth — нет trackId). Now-playing
-                # для них живёт в GET_STATE (music/bluetooth_media_control app).
-                self.track = self._stamp_track(self._track_from_current_state())
+                self.track = self._stamp_track(new_track)
+                self._maybe_fetch_lyrics()
                 if self.track:
-                    self._maybe_fetch_lyrics()
                     _LOGGER.debug(
-                        "track_from_state -> title=%r station=%r source=%s playing=%s",
-                        self.track.title, self.track.station_name,
-                        self.track.media_source, self.track.playing,
+                        "get_metadata -> title=%r artists=%s album=%r track_id=%s "
+                        "release_id=%s playing=%s pos=%s/%s prov=%s",
+                        self.track.title, self.track.artists, self.track.album,
+                        self.track.track_id, self.track.release_id,
+                        self.track.playing, self.track.position_sec,
+                        self.track.duration_sec, self.track.provider,
                     )
                 else:
-                    _LOGGER.debug("get_metadata и GET_STATE без now-playing")
+                    # get_metadata пуст (радио/Bluetooth — нет trackId). Now-playing
+                    # для них живёт в GET_STATE (music/bluetooth_media_control app).
+                    self.track = self._stamp_track(self._track_from_current_state())
+                    if self.track:
+                        self._maybe_fetch_lyrics()
+                        _LOGGER.debug(
+                            "track_from_state -> title=%r station=%r source=%s playing=%s",
+                            self.track.title, self.track.station_name,
+                            self.track.media_source, self.track.playing,
+                        )
+                    else:
+                        _LOGGER.debug("get_metadata и GET_STATE без now-playing")
         except Exception as exc:
             _LOGGER.debug("get_metadata failed: %s", exc)
         try:
@@ -471,9 +642,9 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("get_paired_bt_devices failed: %s", exc)
 
         # Аппаратные датчики / Zigbee-инвентарь (только если модель умеет).
-        if self.iio_cap.any or self.has_zigbee_cli or self.has_matter_cli:
+        if self.hw.any_capability:
             try:
-                await self._poll_hw()
+                await self.hw.async_poll()
             except Exception as exc:
                 _LOGGER.debug("hw poll failed: %s", exc)
 
@@ -508,6 +679,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         prev_track = self.track
         prev_state = self.state
         changed = False
+        metadata_updated = False
         if OP_GET_META_DATA in req_data:    # MetaData update
             try:
                 new_track = self._stamp_track(self.client.parse_track(raw))
@@ -515,6 +687,7 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.track = new_track
                     self._maybe_fetch_lyrics()
                     changed = True
+                    metadata_updated = True
             except Exception:  # pragma: no cover
                 _LOGGER.exception("metadata push parse failed")
         if OP_GET_STATE in req_data:    # State update
@@ -533,9 +706,12 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     self.state = self._merge_state(new_state)
                     changed = True
+                    if not metadata_updated:
+                        self._maybe_update_track_from_state()
             except Exception:
                 _LOGGER.exception("state push parse failed")
         if changed:
+            self._bump_mutations()
             self._fire_change_events(prev_track, prev_state)
             # Прямое обновление + update_listeners вместо async_set_updated_data:
             # последний отменяет pending request_refresh (подтверждение команд)
@@ -606,10 +782,14 @@ class SboomCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     def _event_payload_base(self) -> dict[str, Any]:
-        """Общая часть полезной нагрузки события: device-контекст."""
+        """Общая часть полезной нагрузки события: device-контекст.
+
+        device_id — через общий sber_device_id (fallback на host): тот же
+        идентификатор, что в identifiers устройства и фильтрах device-триггеров.
+        """
         return {
             "entry_id": self.entry.entry_id,
-            "device_id": self.entry.data.get(CONF_DEVICE_ID),
+            "device_id": sber_device_id(self.entry),
             "host": self.entry.data.get(CONF_HOST),
         }
 

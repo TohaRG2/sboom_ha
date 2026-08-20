@@ -17,6 +17,7 @@ import io
 import logging
 import re
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -78,10 +79,36 @@ _URL_KIND_MAP: dict[str, tuple[str, str]] = {
     "release": ("release", "pid"),  # TODO: pt=release для альбома не подтверждён
     "playlist": ("playlist", "pid"),
     "abook": ("podcast", "tid"),
+    # kind сервиса play_music (в URL zvuk.com такого сегмента нет).
+    "podcast": ("podcast", "tid"),
 }
 _URL_RE = re.compile(
     r"zvuk\.com/(track|artist|release|playlist|abook)/(\d+)", re.IGNORECASE
 )
+# pt (playlist type), которые колонка принимает в staros://music deeplink.
+# tid — конкретный трек/подкаст-выпуск, pid — коллекция.
+_VALID_PT = frozenset({"track", "podcast", "artist", "release", "playlist"})
+_PT_TID = frozenset({"track", "podcast"})
+
+# URL для dominant_cover_color приходит из фронтенда панели — серверный GET
+# по нему делать можно только на известные CDN обложек (иначе SSRF в LAN).
+# Суффиксы покрывают cdn-image.zvuk.com, *.mzstatic.com (iTunes, см.
+# cover_client) и *.dzcdn.net (Deezer).
+_ALLOWED_COVER_HOST_SUFFIXES = (".zvuk.com", ".mzstatic.com", ".dzcdn.net")
+_MAX_COVER_BYTES = 5 * 1024 * 1024
+_COLOR_CACHE_MAX = 256
+
+
+def _is_allowed_cover_url(url: str) -> bool:
+    """https + хост из allowlist CDN обложек. Всё остальное — отказ."""
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not host:
+        return False
+    return any(host.endswith(suffix) for suffix in _ALLOWED_COVER_HOST_SUFFIXES)
 
 
 def _dominant_color_from_bytes(data: bytes) -> str | None:
@@ -163,12 +190,21 @@ class ZvukClient:
     async def _graphql(
         self, query: str, variables: dict[str, Any]
     ) -> dict[str, Any]:
-        """Выполнить GraphQL-запрос с X-Auth-Token. Вернуть блок `data`."""
+        """Выполнить GraphQL-запрос с X-Auth-Token. Вернуть блок `data`.
+
+        401 (протух кэшированный анонимный токен) → один retry со свежим
+        токеном; без этого поиск был бы мёртв до рестарта HA.
+        """
         token = await self.get_token()
         payload = {"query": query, "variables": variables}
         resp = await self._http().post(
             GRAPHQL_URL, json=payload, headers={"X-Auth-Token": token}
         )
+        if resp.status_code == 401:
+            token = await self.get_token(force=True)
+            resp = await self._http().post(
+                GRAPHQL_URL, json=payload, headers={"X-Auth-Token": token}
+            )
         resp.raise_for_status()
         body = resp.json()
         if body.get("errors"):
@@ -339,23 +375,48 @@ class ZvukClient:
         и клиентский canvas-разбор невозможен. Кешируется по URL. Тяжёлый
         Pillow-разбор уходит в executor, чтобы не блокировать event loop.
         None — если картинку не удалось получить/разобрать.
+
+        URL приходит из фронтенда: скачиваются только https-обложки с
+        известных CDN (allowlist), тело ограничено, сетевые сбои не кэшируются.
         """
-        if not url:
+        if not url or not _is_allowed_cover_url(url):
             return None
         if url in self._color_cache:
             return self._color_cache[url]
         try:
-            resp = await self._http().get(url)
-            resp.raise_for_status()
-            data = resp.content
-            color = await asyncio.get_running_loop().run_in_executor(
-                None, _dominant_color_from_bytes, data
-            )
-        except (httpx.HTTPError, OSError, ValueError) as exc:
-            _LOGGER.debug("Звук: не удалось извлечь цвет обложки %s: %s", url, exc)
-            color = None
+            data = await self._fetch_cover_limited(url)
+        except httpx.HTTPError as exc:
+            # Сетевая ошибка ≠ not_found: не кэшируем, retry при следующем вызове.
+            _LOGGER.debug("Звук: не удалось скачать обложку %s: %s", url, exc)
+            return None
+        color: str | None = None
+        if data is not None:
+            try:
+                color = await asyncio.get_running_loop().run_in_executor(
+                    None, _dominant_color_from_bytes, data
+                )
+            except (OSError, ValueError) as exc:
+                _LOGGER.debug("Звук: не удалось разобрать обложку %s: %s", url, exc)
+        if len(self._color_cache) >= _COLOR_CACHE_MAX:
+            self._color_cache.pop(next(iter(self._color_cache)))
         self._color_cache[url] = color
         return color
+
+    async def _fetch_cover_limited(self, url: str) -> bytes | None:
+        """Скачать обложку потоково с лимитом размера.
+
+        None — редирект увёл за allowlist или тело больше `_MAX_COVER_BYTES`.
+        """
+        async with self._http().stream("GET", url) as resp:
+            resp.raise_for_status()
+            if not _is_allowed_cover_url(str(resp.url)):
+                return None
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes():
+                buf += chunk
+                if len(buf) > _MAX_COVER_BYTES:
+                    return None
+            return bytes(buf)
 
     async def search(self, query: str, limit: int = 8) -> dict[str, Any]:
         """Поиск по каталогу Звука — ПРОВЕРЕНО вживую (REST /api/tiny/search).
@@ -377,13 +438,23 @@ class ZvukClient:
         if not query.strip():
             return self._empty_search()
         types = ",".join(cat[0] for cat in _SEARCH_CATEGORIES)
-        token = await self.get_token()
         try:
+            # get_token внутри try: недоступность zvuk.com на этапе токена —
+            # тоже «ошибка → пустой результат», а не сырое исключение.
+            token = await self.get_token()
             resp = await self._http().get(
                 SEARCH_URL,
                 params={"query": query, "type": types, "limit": limit},
                 headers={"X-Auth-Token": token},
             )
+            if resp.status_code == 401:
+                # Протух анонимный токен → один retry со свежим (см. _graphql).
+                token = await self.get_token(force=True)
+                resp = await self._http().get(
+                    SEARCH_URL,
+                    params={"query": query, "type": types, "limit": limit},
+                    headers={"X-Auth-Token": token},
+                )
             resp.raise_for_status()
             search = ((resp.json() or {}).get("result") or {}).get("search") or {}
         except (httpx.HTTPError, ValueError, TypeError) as exc:
@@ -489,13 +560,11 @@ class ZvukClient:
         if isinstance(best, dict) and best.get("id"):
             for doc_type, _key, pt in _SEARCH_CATEGORIES:
                 if doc_type == best["type"]:
-                    id_param = "tid" if pt in ("track", "podcast") else "pid"
-                    return self.build_deeplink(pt, id_param, best["id"])
+                    return self.deeplink_for(pt, best["id"])
         for _doc_type, key, pt in _SEARCH_CATEGORIES:
             items = result.get(key) or []
             if items:
-                id_param = "tid" if pt in ("track", "podcast") else "pid"
-                return self.build_deeplink(pt, id_param, items[0]["id"])
+                return self.deeplink_for(pt, items[0]["id"])
         return None
 
     @staticmethod
@@ -526,3 +595,18 @@ class ZvukClient:
     def build_deeplink(pt: str, id_param: str, value: str) -> str:
         """Собрать staros://music deeplink из (pt, id_param, value)."""
         return f"staros://music?{id_param}={value}&pt={pt}"
+
+    @staticmethod
+    def deeplink_for(pt: str | None, content_id: str | None) -> str | None:
+        """Валидированная сборка deeplink из пары (pt, id).
+
+        Единственный путь для недоверенных входов (панель, сервисы): pt только
+        из whitelist, id только цифры — инъекция query-параметров невозможна.
+        None — если вход невалиден.
+        """
+        pt_norm = (pt or "").lower()
+        cid = str(content_id) if content_id is not None else ""
+        if pt_norm not in _VALID_PT or not cid.isdigit():
+            return None
+        id_param = "tid" if pt_norm in _PT_TID else "pid"
+        return ZvukClient.build_deeplink(pt_norm, id_param, cid)

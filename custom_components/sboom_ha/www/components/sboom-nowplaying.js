@@ -107,7 +107,10 @@ class SboomNowPlaying extends LitElement {
   // (обложка/лирика) прогресс не дёргают.
   _reanchor(force) {
     const track = this._track;
-    const ts = Number(track?.position_ts_ms);
+    // received_ts_ms — часы HA в момент получения снимка; position_ts_ms —
+    // часы колонки, которые могут иметь skew (и «в будущем» отключали бы
+    // экстраполяцию). Предпочитаем HA-метку, старый ключ — как fallback.
+    const ts = Number(track?.received_ts_ms ?? track?.position_ts_ms);
     const key = Number.isFinite(ts)
       ? `t${ts}`
       : `${track?.track_id}:${track?.position_sec}`;
@@ -116,8 +119,8 @@ class SboomNowPlaying extends LitElement {
     let base = Number(track?.position_sec);
     base = Number.isFinite(base) ? base : 0;
     // Снимок мог быть сделан давно (напр. при перезагрузке страницы) —
-    // прибавляем время, прошедшее с серверной метки position_ts_ms, как это
-    // делает media_player через media_position_updated_at. При обычном push
+    // прибавляем время, прошедшее с серверной метки, как это делает
+    // media_player через media_position_updated_at. При обычном push
     // метка свежая → прибавка ~0. Skew-защита: игнорируем аномалии.
     if (track?.playing && Number.isFinite(ts)) {
       const elapsed = (Date.now() - ts) / 1000;

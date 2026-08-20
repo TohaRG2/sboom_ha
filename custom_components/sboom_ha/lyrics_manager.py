@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, LYRICS_CACHE_MAX
+from .helpers import track_identity_key
 from .lyrics_client import Lyrics, fetch_lyrics, lyrics_from_dict, lyrics_to_dict
 
 if TYPE_CHECKING:
@@ -40,9 +41,7 @@ def _synthetic_key(track: TrackInfo) -> str | None:
     """
     if track.media_source == "RADIO":
         return None
-    if track.title and track.artists:
-        return f"{track.title}|{','.join(track.artists)}".lower()
-    return None
+    return track_identity_key(track)
 
 
 class LyricsManager:
@@ -72,6 +71,10 @@ class LyricsManager:
         # трек: пока играет тот же — не перезапрашиваем API каждый poll.
         self._volatile_key: str | None = None
         self._volatile: Lyrics | None = None
+        # Ключ ПОСЛЕДНЕГО запрошенного некаталожного трека: поздний результат
+        # для предыдущего трека (A→B, A долетел после B) отбрасывается —
+        # иначе слот перезаписывался бы в порядке завершения задач (аудит #33).
+        self._volatile_wanted: str | None = None
         # Персистентный кеш (JSON в .storage/, переживает рестарты HA).
         self._store: Store = Store(
             hass, LYRICS_STORE_VERSION, f"{DOMAIN}_lyrics_{entry.entry_id}"
@@ -80,6 +83,16 @@ class LyricsManager:
     @property
     def inflight_count(self) -> int:
         return len(self._inflight)
+
+    def supports_track(self, track: TrackInfo | None) -> bool:
+        """Может ли трек в принципе иметь лирику.
+
+        Каталожный (track_id) — да; некаталожный — только если строится
+        synthetic-ключ (радио исключено: позиция эфирная, синк невозможен).
+        Публичная замена импорту приватного `_synthetic_key` из sensor.py
+        (аудит #44).
+        """
+        return bool(track and (track.track_id or _synthetic_key(track)))
 
     def current_for(self, track: TrackInfo | None) -> Lyrics | None:
         """Lyrics для трека (или None если ещё не загружено / не нашлось)."""
@@ -128,7 +141,10 @@ class LyricsManager:
     def _schedule_volatile_fetch(self, track: TrackInfo) -> None:
         """НЕкаталожный трек (BT/радио): fetch напрямую, без диск-кэша."""
         key = _synthetic_key(track)
-        if key is None or key == self._volatile_key or key in self._inflight:
+        if key is None:
+            return
+        self._volatile_wanted = key
+        if key == self._volatile_key or key in self._inflight:
             return
         self._inflight.add(key)
         self._entry.async_create_background_task(
@@ -143,6 +159,35 @@ class LyricsManager:
             name=f"{DOMAIN}-lyrics-volatile",
         )
 
+    async def _run_fetch(
+        self,
+        key: str,
+        title: str,
+        artist: str,
+        album: str | None,
+        duration_sec: int | None,
+        store: Callable[[Lyrics], bool],
+    ) -> None:
+        """Общий скелет фоновой загрузки (аудит #47).
+
+        `store(result)` решает, куда положить результат (каталожный кэш или
+        волатильный слот), и возвращает False, если результат стейл и
+        уведомлять подписчиков не нужно. Сетевая ошибка (None) не кэшируется —
+        retry при следующем track-update.
+        """
+        try:
+            result = await fetch_lyrics(
+                self._http, title, artist, album, duration_sec,
+                use_netease=self._netease_fallback,
+            )
+            if result is None:
+                _LOGGER.debug("lyrics fetch error for %s — will retry later", key)
+                return
+            if store(result):
+                self._on_update()
+        finally:
+            self._inflight.discard(key)
+
     async def _fetch_volatile(
         self,
         key: str,
@@ -152,18 +197,15 @@ class LyricsManager:
         duration_sec: int | None,
     ) -> None:
         """Загрузка для BT/радио: результат в волатильный слот, НЕ в Store."""
-        try:
-            result = await fetch_lyrics(
-                self._http, title, artist, album, duration_sec,
-                use_netease=self._netease_fallback,
-            )
-            if result is None:
-                return  # сетевая ошибка — retry при следующем track-update
+
+        def store(result: Lyrics) -> bool:
+            if self._volatile_wanted not in (None, key):
+                return False  # трек уже сменился — стейл-результат не пишем
             self._volatile_key = key
             self._volatile = result
-            self._on_update()
-        finally:
-            self._inflight.discard(key)
+            return True
+
+        await self._run_fetch(key, title, artist, album, duration_sec, store)
 
     async def _fetch(
         self,
@@ -173,15 +215,7 @@ class LyricsManager:
         album: str | None,
         duration_sec: int | None,
     ) -> None:
-        try:
-            result = await fetch_lyrics(
-                self._http, title, artist, album, duration_sec,
-                use_netease=self._netease_fallback,
-            )
-            if result is None:
-                # Сетевая ошибка — НЕ кэшируем, дадим retry при следующем track-update.
-                _LOGGER.debug("lyrics fetch error for %s — will retry later", track_id)
-                return
+        def store(result: Lyrics) -> bool:
             self.by_track[track_id] = result
             # Персист в Store с debounce — не пишем на диск на каждый трек.
             self._store.async_delay_save(self.cache_snapshot, LYRICS_SAVE_DELAY_SEC)
@@ -191,9 +225,9 @@ class LyricsManager:
                 "found" if result.plain or result.synced
                 else ("instrumental" if result.instrumental else "not_found"),
             )
-            self._on_update()
-        finally:
-            self._inflight.discard(track_id)
+            return True
+
+        await self._run_fetch(track_id, title, artist, album, duration_sec, store)
 
     def cache_snapshot(self) -> dict[str, dict[str, Any]]:
         """Снимок кеша для персиста (только реальные Lyrics, без None)."""

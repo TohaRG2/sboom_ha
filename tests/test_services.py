@@ -87,3 +87,39 @@ async def test_reauth_triggers_async_start_reauth():
     await handler(ServiceCall(data={}))
 
     coord.entry.async_start_reauth.assert_called_once_with(hass)
+
+
+# ────────── сетевые ошибки колонки → HomeAssistantError (аудит #37) ──────────
+
+
+@pytest.mark.asyncio
+async def test_play_music_wraps_speaker_errors(monkeypatch):
+    """TimeoutError от колонки не должен всплывать сырым traceback'ом в UI."""
+    from homeassistant.exceptions import HomeAssistantError
+    from sboom_ha import services
+
+    coord = build_coordinator(track=make_track(), state=make_state())
+
+    async def boom(client, deeplink):
+        raise TimeoutError("no answer")
+
+    monkeypatch.setattr(services, "play_deeplink", boom)
+    call = ServiceCall(data={"url": "https://zvuk.com/track/55"})
+    with pytest.raises(HomeAssistantError):
+        await services._handle_play_music(coord.hass, call)
+
+
+@pytest.mark.asyncio
+async def test_bluetooth_device_wraps_speaker_errors():
+    from homeassistant.exceptions import HomeAssistantError
+    from sboom_ha import services
+
+    coord = build_coordinator(track=make_track(), state=make_state())
+
+    async def boom(mac, cmd):
+        raise RuntimeError("not connected")
+
+    coord.client.bt_device_command = boom
+    call = ServiceCall(data={"mac_address": "AA:BB:CC:DD:EE:FF", "command": "connect"})
+    with pytest.raises(HomeAssistantError):
+        await services._handle_bt_device(coord.hass, call)

@@ -102,8 +102,8 @@ async def _request_get(
     album: str | None,
     duration_sec: int | None,
     timeout: float,
-) -> dict | None | str:
-    """Один запрос. Возвращает dict (data), None (network err), или 'not_found'."""
+) -> dict | str | None:
+    """Один запрос. Возвращает dict (data), 'not_found' (str), или None (network err)."""
     params: dict[str, str] = {"track_name": track, "artist_name": artist}
     if album:
         params["album_name"] = album
@@ -121,8 +121,11 @@ async def _request_get(
             if r.status != 200:
                 _LOGGER.debug("lrclib HTTP %s for %r — %r", r.status, track, artist)
                 return None
-            return await r.json()
-    except (TimeoutError, aiohttp.ClientError) as exc:
+            data = await r.json()
+            # 200 с не-объектом (мусор/прокси) — аномалия, не «не найдено».
+            return data if isinstance(data, dict) else None
+    # ValueError покрывает битый JSON в 200-ответе (json.JSONDecodeError).
+    except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
         _LOGGER.debug("lrclib network err: %s", exc.__class__.__name__)
         return None
 

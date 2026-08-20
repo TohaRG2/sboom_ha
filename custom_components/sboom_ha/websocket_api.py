@@ -20,17 +20,18 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from ._deeplink import play_deeplink, send_server_action
+from ._ha_helpers import get_zvuk_client, iter_coordinators
 from .const import DOMAIN
-from .coordinator import SboomCoordinator
-from .helpers import cover_url
+from .coordinator import COMMAND_SPECS, SboomCoordinator
+from .helpers import cover_url, sber_device_id
 from .zvuk_client import ZvukClient
 
 if TYPE_CHECKING:
@@ -38,32 +39,18 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_ZVUK_CLIENT_KEY = f"{DOMAIN}_zvuk_client"
+# Свободный deeplink из фронтенда уходит на колонку как есть — принимаем
+# только staros://-схему с безопасным набором символов (без пробелов/кавычек:
+# инъекция параметров и разрыв payload'а невозможны). Аудит #41.
+_DEEPLINK_RE = re.compile(r"^staros://[\w.~%/?&=:-]+$")
 
-# pt (playlist type) → в какое поле deeplink кладётся id.
-# tid — конкретный трек/подкаст-выпуск; pid — коллекция (артист/плейлист/релиз).
-_PT_TID = frozenset({"track", "podcast"})
 
-# zvuk.com/{path}/<id> → pt (playlist type) для сборки deeplink.
-# release==album (pt=release — по фактам реверса, помечен как непроверенный).
-_ZVUK_URL_KIND_TO_PT = {
-    "track": "track",
-    "artist": "artist",
-    "release": "release",
-    "playlist": "playlist",
-    "abook": "podcast",
-}
+def _is_valid_deeplink(deeplink: str) -> bool:
+    """True, если строка — безопасный staros:// deeplink."""
+    return bool(_DEEPLINK_RE.match(deeplink))
 
 
 # ─────────────────────────── доступ к состоянию ───────────────────────────
-
-
-def _iter_coordinators(hass: HomeAssistant):
-    """(entry, coordinator) для всех загруженных колонок SberBoom."""
-    for entry in hass.config_entries.async_loaded_entries(DOMAIN):
-        coordinator = getattr(entry, "runtime_data", None)
-        if isinstance(coordinator, SboomCoordinator):
-            yield entry, coordinator
 
 
 def _get_coordinator(
@@ -73,30 +60,23 @@ def _get_coordinator(
 
     Колонок может быть несколько — панель адресует команды по entry_id.
     """
-    for entry, coordinator in _iter_coordinators(hass):
+    for entry, coordinator in iter_coordinators(hass):
         if entry_id is None or entry.entry_id == entry_id:
             return coordinator
     return None
 
 
-def _get_zvuk_client(hass: HomeAssistant) -> ZvukClient:
-    """Единственный кешированный ZvukClient (ленивая инициализация).
-
-    Отдельный HTTP-клиент со своим cookie jar (anti-bot Звука: 307-редирект +
-    cookie ``spid``), поэтому не переиспользуем shared aiohttp-сессию HA.
-    """
-    client: ZvukClient | None = hass.data.get(_ZVUK_CLIENT_KEY)
-    if client is None:
-        client = ZvukClient()
-        hass.data[_ZVUK_CLIENT_KEY] = client
-    return client
-
-
 # ─────────────────────────── сериализация ─────────────────────────────────
 
 
-def _serialize_track(track: TrackInfo | None) -> dict[str, Any] | None:
-    """TrackInfo → JSON-safe dict для панели (плоский now-playing)."""
+def _serialize_track(
+    track: TrackInfo | None, fallback_cover: str | None = None
+) -> dict[str, Any] | None:
+    """TrackInfo → JSON-safe dict для панели (плоский now-playing).
+
+    fallback_cover — обложка, найденная по title+artist (BT/радио, у которых
+    нет каталожного id) — тот же фолбэк, что в media_player и camera.
+    """
     if track is None:
         return None
     return {
@@ -117,6 +97,11 @@ def _serialize_track(track: TrackInfo | None) -> dict[str, Any] | None:
         # снимок позиции + метка времени (unix ms) — панель крутит прогресс
         # локально от этой точки, как media_player.media_position_updated_at.
         "position_ts_ms": track.position_ts_ms,
+        # Часы HA в момент получения снимка: часы колонки (position_ts_ms)
+        # могут расходиться с реальностью — фронтенд предпочитает эту метку.
+        "received_ts_ms": (
+            int(track.received_ts * 1000) if track.received_ts else None
+        ),
         "playing": track.playing,
         "shuffle": track.shuffle,
         "repeat": track.repeat,
@@ -124,7 +109,7 @@ def _serialize_track(track: TrackInfo | None) -> dict[str, Any] | None:
         "liked": track.liked,
         "has_lyrics": track.has_lyrics,
         "playback_speed": track.playback_speed,
-        "cover_url": cover_url(track),
+        "cover_url": cover_url(track) or fallback_cover,
     }
 
 
@@ -138,31 +123,6 @@ def _serialize_state(state: SpeakerState | None) -> dict[str, Any] | None:
     }
 
 
-# ─────────────────────────── deeplink helpers ─────────────────────────────
-
-
-def _build_deeplink(pt: str, item_id: str) -> str:
-    """Собрать staros-deeplink из pt (playlist type) и id.
-
-    track/podcast → tid, всё остальное (artist/playlist/release) → pid.
-    """
-    key = "tid" if pt in _PT_TID else "pid"
-    return f"staros://music?{key}={item_id}&pt={pt}"
-
-
-def _deeplink_from_zvuk_url(url: str) -> str | None:
-    """zvuk.com/{track|artist|release|playlist|abook}/<id> → staros-deeplink."""
-    parsed = urlparse(url)
-    segments = [seg for seg in parsed.path.split("/") if seg]
-    if len(segments) < 2:
-        return None
-    kind, item_id = segments[-2], segments[-1]
-    pt = _ZVUK_URL_KIND_TO_PT.get(kind)
-    if pt is None or not item_id:
-        return None
-    return _build_deeplink(pt, item_id)
-
-
 # ─────────────────────────── команды ──────────────────────────────────────
 
 
@@ -174,7 +134,7 @@ def _state_payload(
         "connected": coordinator.connected,
         "version": hass.data.get(f"{DOMAIN}_version"),
         "state": _serialize_state(coordinator.state),
-        "track": _serialize_track(coordinator.track),
+        "track": _serialize_track(coordinator.track, coordinator.current_cover()),
     }
 
 
@@ -185,10 +145,19 @@ def ws_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Список доступных колонок для селектора панели."""
+    """Список доступных колонок для селектора панели.
+
+    `serial` (= Sber device_id) — мост к сущностям настроек/эквалайзера
+    интеграции sberhome: у поженённого HA-устройства общий identifier
+    ``("sber_speaker", serial)``, по нему фронтенд находит эквалайзер.
+    """
     devices = [
-        {"entry_id": entry.entry_id, "name": entry.title}
-        for entry, _ in _iter_coordinators(hass)
+        {
+            "entry_id": entry.entry_id,
+            "name": entry.title,
+            "serial": sber_device_id(entry),
+        }
+        for entry, _ in iter_coordinators(hass)
     ]
     connection.send_result(msg["id"], {"devices": devices})
 
@@ -196,7 +165,7 @@ def ws_devices(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/state",
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @callback
@@ -216,7 +185,7 @@ def ws_state(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/subscribe",
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @callback
@@ -245,7 +214,24 @@ def ws_subscribe(
             )
         )
 
-    connection.subscriptions[msg["id"]] = coordinator.async_add_listener(_forward)
+    @callback
+    def _on_stop() -> None:
+        # Координатор останавливается (reload/unload entry) — терминальное
+        # событие, по которому фронтенд переподписывается на новый инстанс
+        # (иначе подписка замирала бы на мёртвом координаторе — аудит #32).
+        connection.send_message(
+            websocket_api.event_message(msg["id"], {"terminated": True})
+        )
+
+    unsub_update = coordinator.async_add_listener(_forward)
+    unsub_stop = coordinator.async_add_stop_listener(_on_stop)
+
+    @callback
+    def _unsubscribe() -> None:
+        unsub_update()
+        unsub_stop()
+
+    connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"])
     _forward()  # начальное состояние
 
@@ -269,7 +255,7 @@ async def ws_search(
     tracks, playlists}. Каждый элемент — {id, type, title, subtitle,
     cover_url, pt, explicit, duration}.
     """
-    zvuk = _get_zvuk_client(hass)
+    zvuk = get_zvuk_client(hass)
     query: str = msg["query"]
     limit: int = msg.get("limit", 8)
     try:
@@ -295,7 +281,7 @@ async def ws_artist(
     msg: dict[str, Any],
 ) -> None:
     """Детали артиста (drill-down): релизы + топ-треки из каталога Звука."""
-    zvuk = _get_zvuk_client(hass)
+    zvuk = get_zvuk_client(hass)
     try:
         artist = await zvuk.get_artist(msg["content_id"])
     except Exception as exc:
@@ -322,7 +308,7 @@ async def ws_release(
     msg: dict[str, Any],
 ) -> None:
     """Детали релиза (drill-down): шапка + треклист из каталога Звука."""
-    zvuk = _get_zvuk_client(hass)
+    zvuk = get_zvuk_client(hass)
     try:
         release = await zvuk.get_release(msg["content_id"])
     except Exception as exc:
@@ -346,7 +332,7 @@ async def ws_release(
         # kind / pt — синонимы (pt = playlist type в терминах Звука).
         vol.Optional("kind"): str,
         vol.Optional("pt"): str,
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -362,13 +348,21 @@ async def ws_play(
         return
 
     deeplink: str | None = msg.get("deeplink")
+    if deeplink is not None and not _is_valid_deeplink(deeplink):
+        connection.send_error(
+            msg["id"], "invalid_args", "invalid deeplink"
+        )
+        return
     if deeplink is None and (url := msg.get("url")):
-        deeplink = _deeplink_from_zvuk_url(url)
-        if deeplink is None:
+        # Разбор/валидация zvuk-URL — единый источник в ZvukClient (хост
+        # zvuk.com, известный kind, числовой id).
+        parsed = ZvukClient.parse_zvuk_url(url)
+        if parsed is None:
             connection.send_error(
                 msg["id"], "invalid_args", f"Unrecognized url: {url}"
             )
             return
+        deeplink = ZvukClient.build_deeplink(*parsed)
     if deeplink is None and (item_id := msg.get("content_id")):
         pt = msg.get("pt") or msg.get("kind")
         if not pt:
@@ -376,7 +370,12 @@ async def ws_play(
                 msg["id"], "invalid_args", "id requires kind or pt"
             )
             return
-        deeplink = _build_deeplink(pt, item_id)
+        deeplink = ZvukClient.deeplink_for(pt, item_id)
+        if deeplink is None:
+            connection.send_error(
+                msg["id"], "invalid_args", f"invalid pt/id: {pt}/{item_id}"
+            )
+            return
     if deeplink is None:
         connection.send_error(
             msg["id"], "invalid_args", "one of deeplink/url/id is required"
@@ -411,7 +410,7 @@ async def ws_cover_color(
     Считается на сервере (CDN Звука без CORS → клиентский canvas невозможен),
     кешируется по URL в ZvukClient.
     """
-    zvuk = _get_zvuk_client(hass)
+    zvuk = get_zvuk_client(hass)
     try:
         color = await zvuk.dominant_cover_color(msg["url"])
     except Exception as exc:
@@ -434,7 +433,7 @@ async def ws_track_meta(
     msg: dict[str, Any],
 ) -> None:
     """Метаданные треков по id из каталога Звука (обложки/исполнители/длит.)."""
-    zvuk = _get_zvuk_client(hass)
+    zvuk = get_zvuk_client(hass)
     ids: list[str] = msg["ids"]
     try:
         tracks = await zvuk.get_tracks(ids)
@@ -445,80 +444,12 @@ async def ws_track_meta(
     connection.send_result(msg["id"], {"tracks": tracks})
 
 
-# action → (метод клиента, нужен ли value). value_kind: None|"int"|"float"|"bool"|"str".
-_MEDIA_ACTIONS: dict[str, tuple[str, str | None]] = {
-    "play": ("media_play", None),
-    "pause": ("media_pause", None),
-    "next": ("media_next", None),
-    "prev": ("media_prev", None),
-    "previous": ("media_prev", None),
-    "mute": ("media_mute", None),
-    "unmute": ("media_unmute", None),
-    "like": ("media_like", None),
-    "remove_like": ("media_remove_like", None),
-    "dislike": ("media_dislike", None),
-    "remove_dislike": ("media_remove_dislike", None),
-    "find_remote": ("find_remote", None),
-    "volume": ("set_volume", "int"),
-    "seek": ("seek_to", "int"),
-    "shuffle": ("media_shuffle", "bool"),
-    "repeat": ("media_repeat", "str"),
-    "playback_speed": ("set_playback_speed", "float"),
-}
-
-
-def _coerce_value(kind: str, value: Any) -> Any:
-    """Привести value из JSON к типу, ожидаемому методом клиента."""
-    if kind == "int":
-        return int(value)
-    if kind == "float":
-        return float(value)
-    if kind == "bool":
-        return bool(value)
-    return str(value)
-
-
-def _apply_optimistic(
-    coordinator: SboomCoordinator, action: str, value: Any
-) -> None:
-    """Оптимистично отразить команду в состоянии — мгновенно в панели.
-
-    Зеркалит media_player: координатор патчит локальный TrackInfo/SpeakerState
-    и шлёт ``async_update_listeners()`` → подписанная панель обновляется сразу,
-    не дожидаясь реального push от колонки (иначе кнопки «залипают»/откатывают).
-    next/prev/seek — без патча: трек/позиция придут push'ем, а скраббер панель
-    двигает сама.
-    """
-    if action == "play":
-        coordinator.apply_optimistic_track(playing=True)
-    elif action == "pause":
-        coordinator.apply_optimistic_track(playing=False)
-    elif action == "like":
-        coordinator.apply_optimistic_track(liked=True)
-    elif action == "remove_like":
-        coordinator.apply_optimistic_track(liked=False)
-    elif action == "dislike":
-        coordinator.apply_optimistic_track(liked=False)
-    elif action == "mute":
-        coordinator.apply_optimistic_state(muted=True)
-    elif action == "unmute":
-        coordinator.apply_optimistic_state(muted=False)
-    elif action == "volume" and value is not None:
-        coordinator.apply_optimistic_state(volume_percent=int(value))
-    elif action == "shuffle" and value is not None:
-        coordinator.apply_optimistic_track(shuffle=bool(value))
-    elif action == "repeat" and value is not None:
-        coordinator.apply_optimistic_track(repeat=str(value))
-    elif action == "playback_speed" and value is not None:
-        coordinator.apply_optimistic_track(playback_speed=float(value))
-
-
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/command",
-        vol.Required("action"): vol.In(sorted(_MEDIA_ACTIONS)),
+        vol.Required("action"): vol.In(sorted(COMMAND_SPECS)),
         vol.Optional("value"): vol.Any(int, float, bool, str),
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -527,43 +458,33 @@ async def ws_command(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """media/volume-команды колонки (play/pause/volume/seek/shuffle/…)."""
+    """media/volume-команды колонки (play/pause/volume/seek/shuffle/…).
+
+    Тонкий адаптер над единым командным слоем coordinator.async_execute
+    (аудит #18): optimistic-патч и refresh-политика — там, панель получает
+    мгновенное обновление через async_update_listeners.
+    """
     coordinator = _get_coordinator(hass, msg.get("entry_id"))
     if coordinator is None:
         connection.send_error(msg["id"], "not_loaded", "Integration not loaded")
         return
 
-    action = msg["action"]
-    method_name, value_kind = _MEDIA_ACTIONS[action]
-    method = getattr(coordinator.client, method_name)
-    value: Any = None
     try:
-        if value_kind is None:
-            await method()
-        else:
-            if "value" not in msg:
-                connection.send_error(
-                    msg["id"], "invalid_args", f"{action} requires value"
-                )
-                return
-            value = _coerce_value(value_kind, msg["value"])
-            await method(value)
+        await coordinator.async_execute(msg["action"], msg.get("value"))
     except (ValueError, TypeError) as exc:
         connection.send_error(msg["id"], "invalid_args", str(exc))
         return
     except Exception as exc:
-        _LOGGER.debug("sboom/command %s failed: %s", action, exc)
+        _LOGGER.debug("sboom/command %s failed: %s", msg["action"], exc)
         connection.send_error(msg["id"], "command_failed", str(exc))
         return
-    # мгновенно отразить в подписанной панели (не ждать push от колонки)
-    _apply_optimistic(coordinator, action, value)
     connection.send_result(msg["id"], {"success": True})
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "sboom/queue",
-        vol.Optional("entry_id"): str,
+        vol.Optional("entry_id"): vol.Any(str, None),
     }
 )
 @websocket_api.async_response
@@ -593,7 +514,7 @@ async def ws_queue(
     meta_by_id: dict[str, dict[str, Any]] = {}
     if ids:
         try:
-            for track in await _get_zvuk_client(hass).get_tracks(ids):
+            for track in await get_zvuk_client(hass).get_tracks(ids):
                 meta_by_id[str(track.get("id"))] = track
         except Exception as exc:  # обогащение best-effort — очередь важнее
             _LOGGER.debug("sboom/queue enrich failed: %s", exc)

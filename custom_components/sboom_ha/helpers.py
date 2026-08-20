@@ -5,11 +5,34 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from .const import COVER_SIZE, ZVUK_IMAGE_CDN
+from .const import CONF_DEVICE_ID, CONF_HOST, COVER_SIZE, ZVUK_IMAGE_CDN
 
 if TYPE_CHECKING:
     from .api import TrackInfo
     from .coordinator import SboomCoordinator
+
+
+def track_identity_key(track: TrackInfo) -> str | None:
+    """`title|artists` (lower) — идентичность некаталожного трека (BT/радио).
+
+    Общий ключ для LyricsManager и CoverManager (аудит #47): у некаталожного
+    контента нет track_id, треки различаются только по метаданным.
+    """
+    if track.title and track.artists:
+        return f"{track.title}|{','.join(track.artists)}".lower()
+    return None
+
+
+def sber_device_id(entry) -> str | None:
+    """Sber-идентификатор колонки с единым fallback на host.
+
+    Единственный источник правила `CONF_DEVICE_ID or host` — им обязаны
+    пользоваться и identifiers устройства (_entity_base), и события в HA bus
+    (coordinator), и device-триггеры: разные fallback'и в этих слоях делали
+    device-триггеры молча мёртвыми для manual-entry (аудит #4).
+    """
+    data = getattr(entry, "data", None) or {}
+    return data.get(CONF_DEVICE_ID) or data.get(CONF_HOST)
 
 
 # Защита от мусорных значений timestamp (например при reboot колонки).
@@ -33,12 +56,22 @@ def track_position(coordinator: SboomCoordinator) -> float | None:
     if track.playing:
         delta: float | None = None
         if track.received_monotonic is not None:
+            # Штамп ставит HA — мусорным быть не может. Длинный разрыв между
+            # обновлениями клампим к капу, а не отбрасываем: иначе позиция
+            # длинного трека (подкаст) на 601-й секунде откатывалась к базе.
             delta = time.monotonic() - track.received_monotonic
+            delta = min(delta, float(_MAX_EXTRAPOLATION_SEC))
+            if delta < 0:
+                delta = None
         elif track.position_ts_ms:
+            # Часы колонки подозрительны (reboot/skew) — мусорную дельту
+            # отбрасываем целиком.
             delta = (
                 datetime.now(UTC).timestamp() * 1000 - track.position_ts_ms
             ) / 1000.0
-        if delta is not None and 0 <= delta < _MAX_EXTRAPOLATION_SEC:
+            if not 0 <= delta < _MAX_EXTRAPOLATION_SEC:
+                delta = None
+        if delta is not None:
             speed = track.playback_speed or 1.0
             if speed <= 0:
                 speed = 1.0

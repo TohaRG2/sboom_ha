@@ -96,7 +96,6 @@ class SpeakerState:
     # state, чтобы частичный/битый push не обнулял громкость в UI.
     volume_percent: int | None = None
     muted: bool | None = None
-    track: TrackInfo | None = None
     raw_state_json: str | None = None
     device: DeviceState | None = None
 

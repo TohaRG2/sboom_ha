@@ -65,3 +65,66 @@ def test_before_first_line_idx_minus_one():
 def test_empty_timeline():
     idx, cur, nxt, frac = _timeline_at([], 10.0)
     assert (idx, cur, nxt, frac) == (-1, None, None, None)
+
+
+# ────────────────── _stream_idle: первый кадр без позиции (аудит #9) ──────
+
+
+import asyncio  # noqa: E402
+import contextlib  # noqa: E402
+
+import pytest  # noqa: E402
+
+from tests._fakes import build_coordinator, make_track  # noqa: E402
+
+
+class _RecordingResponse:
+    """Фейковый StreamResponse: записывает первый кадр и обрывает стрим."""
+
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+
+    async def write(self, data: bytes) -> None:
+        self.writes.append(data)
+        raise ConnectionResetError  # завершить стрим после первого кадра
+
+
+@pytest.mark.asyncio
+async def test_stream_idle_writes_first_frame_without_position():
+    """BT-трек без позиции: раньше cur_sec==last_sec==None навсегда — 0 кадров."""
+    from sboom_ha.camera import SboomLyricsCamera
+
+    coord = build_coordinator(
+        track=make_track(
+            title="BT Song", position_sec=None, duration_sec=None,
+            track_id=None, provider=None, release_id=None, artist_ids=[],
+        )
+    )
+    cam = SboomLyricsCamera(coord, coord.entry)
+    resp = _RecordingResponse()
+    with contextlib.suppress(ConnectionResetError, asyncio.TimeoutError):
+        await asyncio.wait_for(cam._stream_idle(resp), timeout=2.5)
+    assert resp.writes, "первый кадр обязан отрисоваться даже без позиции (BT)"
+
+
+# ────────── негативный кэш обложки при лежащем CDN (аудит #39) ──────────
+
+
+@pytest.mark.asyncio
+async def test_failed_cover_download_not_retried_every_frame():
+    """Idle-стрим зовёт _fetch_cover_raw каждый кадр: при лежащем CDN
+    неудачный URL кэшируется на время, а не качается заново раз в секунду."""
+    from sboom_ha.camera import SboomLyricsCamera
+
+    coord = build_coordinator(track=make_track())  # zvuk-трек: cover_url есть
+    cam = SboomLyricsCamera(coord, coord.entry)
+    calls: list[str] = []
+
+    async def failing_download(url: str):
+        calls.append(url)
+        return None
+
+    cam._download_cover = failing_download
+    await cam._fetch_cover_raw(coord.track)
+    await cam._fetch_cover_raw(coord.track)
+    assert len(calls) == 1, "повторный кадр не должен качать лежащий CDN заново"

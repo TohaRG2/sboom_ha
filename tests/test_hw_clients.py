@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 from sboom_ha.cli4242 import (
     Cli4242Client,
-    matter_count,
     parse_matter_list,
     parse_zigbee_list,
 )
@@ -150,13 +149,6 @@ def test_parse_matter_list_real_device():
     assert d.rssi == -55
 
 
-def test_matter_count_real_table_and_empty():
-    """Заголовок НЕ считается устройством (регресс: было 2 вместо 1)."""
-    assert matter_count(_MATTER_TBL) == 1
-    assert matter_count("Matter device list is empty") == 0
-    assert matter_count("") == 0
-
-
 @pytest.mark.asyncio
 async def test_matter_probe_accepts_real_device_table():
     """КОРЕНЬ РЕГРЕССА: probe должен принять таблицу устройства (без слова 'matter').
@@ -177,3 +169,24 @@ async def test_matter_probe_rejects_missing_command_and_none():
     assert await c.async_matter_probe() is False
     c._run = AsyncMock(return_value=None)
     assert await c.async_matter_probe() is False
+
+
+# ────────── _drain: ранний выход по тишине, а не полный timeout (аудит #15) ──
+
+
+import asyncio  # noqa: E402
+import time  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_drain_exits_quickly_after_output_ends():
+    """CLI держит соединение открытым (EOF не приходит) — после последнего
+    чанка нельзя сжигать полный read-timeout (3 c на каждую команду)."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(b"| NodeId | XID |\n| 0011223344556677 | x |\n")
+    # EOF не фидим: живое CLI-соединение не закрывается.
+    t0 = time.monotonic()
+    data = await Cli4242Client._drain(reader, 3.0)
+    elapsed = time.monotonic() - t0
+    assert data == b"| NodeId | XID |\n| 0011223344556677 | x |\n"
+    assert elapsed < 1.5, f"ожидали ранний выход по тишине, ждали {elapsed:.1f}s"

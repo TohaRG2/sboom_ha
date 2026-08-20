@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant, callback
@@ -20,7 +24,6 @@ from ._schedule import next_alarm, next_timer
 from .coordinator import SboomCoordinator
 from .helpers import lyrics_position
 from .lyrics_client import current_line
-from .lyrics_manager import _synthetic_key
 
 # Read-only сенсоры, данные из coordinator — параллелизм безразличен.
 PARALLEL_UPDATES = 0
@@ -41,18 +44,13 @@ class SboomSensorSpec:
     value_fn: Callable[[SboomCoordinator], Any]
     attrs_fn: Callable[[SboomCoordinator], dict[str, Any] | None] | None = None
     native_unit: str | None = None
-    state_class: Any = None  # SensorStateClass; Any — чтобы не тянуть импорт в тестовые stub'ы
-    device_class: Any = None  # SensorDeviceClass; аналогично
+    state_class: SensorStateClass | None = None
+    device_class: SensorDeviceClass | None = None
     entity_category: EntityCategory | None = None
     enabled_default: bool = True
     # Для «железных» сенсоров (libiio/Zigbee): создавать, только если модель
     # реально умеет. None = сенсор доступен всегда (обычные подсистемы GET_STATE).
     available_fn: Callable[[SboomCoordinator], bool] | None = None
-
-
-def _dev(c: SboomCoordinator) -> DeviceState | None:
-    """Подсистемы устройства из последнего GET_STATE, либо None."""
-    return c.state.device if c.state else None
 
 
 def _link_count(dev: DeviceState | None) -> int | None:
@@ -108,33 +106,33 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         translation_key="led_brightness",
         icon="mdi:brightness-6",
         native_unit=PERCENTAGE,
-        state_class="measurement",  # строка == SensorStateClass.MEASUREMENT
-        value_fn=lambda c: dev.led_brightness if (dev := _dev(c)) else None,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda c: dev.led_brightness if (dev := c.device_state) else None,
     ),
     # Количество установленных будильников. Список — в атрибутах.
     SboomSensorSpec(
         key="alarms",
         translation_key="alarms",
         icon="mdi:alarm",
-        value_fn=lambda c: dev.alarms_count if (dev := _dev(c)) else None,
-        attrs_fn=lambda c: {"alarms": dev.alarms} if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.alarms_count if (dev := c.device_state) else None,
+        attrs_fn=lambda c: {"alarms": dev.alarms} if (dev := c.device_state) else None,
     ),
     # Количество активных таймеров. Список — в атрибутах.
     SboomSensorSpec(
         key="timers",
         translation_key="timers",
         icon="mdi:timer-outline",
-        value_fn=lambda c: dev.timers_count if (dev := _dev(c)) else None,
-        attrs_fn=lambda c: {"timers": dev.timers} if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.timers_count if (dev := c.device_state) else None,
+        attrs_fn=lambda c: {"timers": dev.timers} if (dev := c.device_state) else None,
     ),
     # Время ближайшего срабатывания будильника (timestamp).
     SboomSensorSpec(
         key="next_alarm",
         translation_key="next_alarm",
         icon="mdi:alarm-check",
-        device_class="timestamp",
+        device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda c: (
-            next_alarm(dev.alarms, datetime.now(UTC)) if (dev := _dev(c)) else None
+            next_alarm(dev.alarms, datetime.now(UTC)) if (dev := c.device_state) else None
         ),
     ),
     # Время окончания ближайшего таймера (timestamp).
@@ -142,9 +140,9 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         key="next_timer",
         translation_key="next_timer",
         icon="mdi:timer-check-outline",
-        device_class="timestamp",
+        device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda c: (
-            next_timer(dev.timers, datetime.now(UTC)) if (dev := _dev(c)) else None
+            next_timer(dev.timers, datetime.now(UTC)) if (dev := c.device_state) else None
         ),
     ),
     # Активное (играющее) приложение; весь z-order стек — в атрибутах.
@@ -152,9 +150,9 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         key="active_app",
         translation_key="active_app",
         icon="mdi:application",
-        value_fn=lambda c: dev.active_app if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.active_app if (dev := c.device_state) else None,
         attrs_fn=lambda c: (
-            {"app_stack": dev.app_stack} if (dev := _dev(c)) and dev.app_stack else None
+            {"app_stack": dev.app_stack} if (dev := c.device_state) and dev.app_stack else None
         ),
     ),
     # Приложение на переднем плане (current_app) — в отличие от active_app
@@ -163,7 +161,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         key="foreground_app",
         translation_key="foreground_app",
         icon="mdi:cellphone-screenshot",
-        value_fn=lambda c: dev.foreground_app if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.foreground_app if (dev := c.device_state) else None,
     ),
     # Тип воспроизведения: music/wave/podcast/radio/bluetooth. В отличие от
     # active_app (=music для всего аудио), различает радио, BT и подкаст —
@@ -179,7 +177,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         key="assistant_character",
         translation_key="assistant_character",
         icon="mdi:account-voice",
-        value_fn=lambda c: dev.assistant_character if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.assistant_character if (dev := c.device_state) else None,
     ),
     # Режим multiroom (NONE/…). При объединении в стереопару — канал (L/R) и
     # устройство-партнёр в атрибутах.
@@ -188,14 +186,14 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         translation_key="multiroom_mode",
         icon="mdi:speaker-multiple",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda c: dev.multiroom_mode if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.multiroom_mode if (dev := c.device_state) else None,
         attrs_fn=lambda c: (
             {
                 "stereo_pair_active": dev.stereo_pair_active,
                 "stereo_pair_channel": dev.stereo_pair_channel,
                 "stereo_pair_device": dev.stereo_pair_device,
             }
-            if (dev := _dev(c))
+            if (dev := c.device_state)
             and (dev.stereo_pair_active or dev.stereo_pair_channel or dev.stereo_pair_device)
             else None
         ),
@@ -211,8 +209,8 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:link-variant",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
-        value_fn=lambda c: _link_count(_dev(c)),
-        attrs_fn=lambda c: _link_attrs(_dev(c)),
+        value_fn=lambda c: _link_count(c.device_state),
+        attrs_fn=lambda c: _link_attrs(c.device_state),
     ),
     # Тип сетевого подключения колонки (WIFI/…).
     SboomSensorSpec(
@@ -220,7 +218,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         translation_key="network_type",
         icon="mdi:wifi",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda c: dev.network_type if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.network_type if (dev := c.device_state) else None,
     ),
     # Спаренные Bluetooth-устройства. State = количество, список — в атрибутах.
     SboomSensorSpec(
@@ -242,7 +240,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:ip-network",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
-        value_fn=lambda c: dev.network_ip if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.network_ip if (dev := c.device_state) else None,
     ),
     # Канал прошивки (device_segments, напр. "OpenBeta"). Diagnostic.
     SboomSensorSpec(
@@ -251,7 +249,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:test-tube",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
-        value_fn=lambda c: dev.firmware_channel if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.firmware_channel if (dev := c.device_state) else None,
     ),
     # Часовой пояс колонки (time.timezone_id) + смещение в атрибутах. Diagnostic.
     SboomSensorSpec(
@@ -260,10 +258,10 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:map-clock",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
-        value_fn=lambda c: dev.timezone_id if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.timezone_id if (dev := c.device_state) else None,
         attrs_fn=lambda c: (
             {"offset_hours": dev.timezone_offset_sec / 3600}
-            if (dev := _dev(c)) and dev.timezone_offset_sec is not None
+            if (dev := c.device_state) and dev.timezone_offset_sec is not None
             else None
         ),
     ),
@@ -274,13 +272,13 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         icon="mdi:account-child",
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
-        value_fn=lambda c: dev.age_mode if (dev := _dev(c)) else None,
+        value_fn=lambda c: dev.age_mode if (dev := c.device_state) else None,
         attrs_fn=lambda c: (
             {
                 "multi_profile": dev.multi_profile,
                 "child_voice_explicit": dev.child_voice_explicit,
             }
-            if (dev := _dev(c)) and dev.multi_profile is not None
+            if (dev := c.device_state) and dev.multi_profile is not None
             else None
         ),
     ),
@@ -293,12 +291,12 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         translation_key="clock_skew",
         icon="mdi:clock-alert-outline",
         native_unit="s",
-        state_class="measurement",
+        state_class=SensorStateClass.MEASUREMENT,
         entity_category=EntityCategory.DIAGNOSTIC,
         enabled_default=False,
         value_fn=lambda c: (
             round(dev.device_unixtime - time.time())
-            if (dev := _dev(c)) and dev.device_unixtime is not None
+            if (dev := c.device_state) and dev.device_unixtime is not None
             else None
         ),
     ),
@@ -314,7 +312,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         enabled_default=False,
         value_fn=lambda c: (
             f"{dev.latitude}, {dev.longitude}"
-            if (dev := _dev(c)) and dev.latitude is not None and dev.longitude is not None
+            if (dev := c.device_state) and dev.latitude is not None and dev.longitude is not None
             else None
         ),
         attrs_fn=lambda c: (
@@ -324,7 +322,7 @@ SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
                 "gps_accuracy": dev.location_accuracy,
                 "source": dev.location_source,
             }
-            if (dev := _dev(c)) and dev.latitude is not None
+            if (dev := c.device_state) and dev.latitude is not None
             else None
         ),
     ),
@@ -339,8 +337,8 @@ HW_SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         key="illuminance",
         translation_key="illuminance",
         native_unit="lx",
-        state_class="measurement",
-        device_class="illuminance",
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.ILLUMINANCE,
         available_fn=lambda c: c.iio_cap.has_illuminance,
         value_fn=lambda c: c.iio_reading.illuminance_lux,
     ),
@@ -349,8 +347,8 @@ HW_SENSOR_SPECS: tuple[SboomSensorSpec, ...] = (
         key="soc_temperature",
         translation_key="soc_temperature",
         native_unit="°C",
-        state_class="measurement",
-        device_class="temperature",
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.TEMPERATURE,
         entity_category=EntityCategory.DIAGNOSTIC,
         available_fn=lambda c: c.iio_cap.has_thermal,
         value_fn=lambda c: c.iio_reading.soc_temp_c,
@@ -539,7 +537,7 @@ class SboomLyricsFullSensor(SboomEntity, SensorEntity):
     _attr_entity_registry_enabled_default = False  # включается вручную если нужен
     # ENUM: набор состояний определяется нашим же кодом (native_value ниже) —
     # HA получает переводимые состояния и валидацию значений.
-    _attr_device_class = "enum"  # строка == SensorDeviceClass.ENUM
+    _attr_device_class = SensorDeviceClass.ENUM
     _attr_options: list[str] = ["no_track", "loading", "available", "instrumental", "not_found"]  # noqa: RUF012 — контракт HA: list
 
     def __init__(self, coordinator: SboomCoordinator, entry: ConfigEntry) -> None:
@@ -550,8 +548,8 @@ class SboomLyricsFullSensor(SboomEntity, SensorEntity):
     def native_value(self) -> str | None:
         track = self.coordinator.track
         # Лирика возможна для каталога (track_id) и Bluetooth (synthetic-ключ);
-        # радио исключено (позиция эфирная — синк невозможен → _synthetic_key None).
-        if not track or (not track.track_id and _synthetic_key(track) is None):
+        # радио исключено (позиция эфирная — синк невозможен).
+        if not self.coordinator.lyrics.supports_track(track):
             return "no_track"
         lyrics = self.coordinator.current_lyrics()
         if lyrics is None:

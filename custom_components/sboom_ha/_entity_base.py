@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SboomCoordinator
+from .helpers import sber_device_id
 
 
 class SboomEntity(CoordinatorEntity[SboomCoordinator]):
@@ -29,13 +30,16 @@ class SboomEntity(CoordinatorEntity[SboomCoordinator]):
         super().__init__(coordinator)
         self._entry = entry
         host = entry.data[CONF_HOST]
-        device_id = entry.data.get(CONF_DEVICE_ID) or host
+        device_id = sber_device_id(entry)
         self._device_unique_prefix = f"{DOMAIN}_{device_id}"
 
         # Полный набор полей DeviceInfo. None-поля HA проигнорирует, поэтому
         # для manual flow (без zeroconf) часть полей просто не будет показана.
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
+            # Общий с sberhome identifier ("sber_speaker", <serial>) — HA сольёт
+            # обе интеграции колонки в одну карточку устройства (медиа отсюда,
+            # настройки/эквалайзер из sberhome). Ключ — общий serial колонки.
+            identifiers={(DOMAIN, device_id), ("sber_speaker", device_id)},
             name=entry.data.get(CONF_DEVICE_NAME) or f"SberBoom {host}",
             manufacturer="SberDevices",
             model=entry.data.get(CONF_DEVICE_MODEL) or "SberBoom",

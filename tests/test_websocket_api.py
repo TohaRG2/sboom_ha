@@ -1,42 +1,77 @@
 """Тесты helper'ов WebSocket API панели.
 
-Проверяем чистые функции сборки/разбора deeplink — контракт tid vs pid и
-разбор zvuk-URL, на который завязаны панель (sboom/play) и сервис play_music.
+Проверяем валидацию входов sboom/play — deeplink из фронтенда, zvuk-URL и
+пары pt+id идут на колонку только после проверки (SSRF/инъекции — аудит #41).
+Сборка deeplink делегируется ZvukClient (единый источник — аудит #17).
 Импорт модуля идёт через HA-стабы (conftest).
 """
 from __future__ import annotations
 
 import pytest
-from sboom_ha.websocket_api import _build_deeplink, _deeplink_from_zvuk_url
+from sboom_ha.websocket_api import _is_valid_deeplink
 
 
 @pytest.mark.parametrize(
-    ("pt", "item_id", "expected"),
+    "deeplink",
     [
-        ("track", "1", "staros://music?tid=1&pt=track"),
-        ("podcast", "2", "staros://music?tid=2&pt=podcast"),
-        ("artist", "3", "staros://music?pid=3&pt=artist"),
-        ("release", "4", "staros://music?pid=4&pt=release"),
-        ("playlist", "5", "staros://music?pid=5&pt=playlist"),
+        "staros://music?tid=84279897&pt=track",
+        "staros://music?pid=126769660&pt=artist",
+        "staros://radio?station=record",
     ],
 )
-def test_build_deeplink_tid_vs_pid(pt, item_id, expected):
-    assert _build_deeplink(pt, item_id) == expected
+def test_is_valid_deeplink_accepts_staros(deeplink):
+    assert _is_valid_deeplink(deeplink)
 
 
 @pytest.mark.parametrize(
-    ("url", "expected"),
+    "deeplink",
     [
-        ("https://zvuk.com/track/84279897", "staros://music?tid=84279897&pt=track"),
-        ("https://zvuk.com/artist/126769660", "staros://music?pid=126769660&pt=artist"),
-        ("https://zvuk.com/release/14359015", "staros://music?pid=14359015&pt=release"),
-        ("https://zvuk.com/abook/999", "staros://music?tid=999&pt=podcast"),
+        "https://evil.example/x",  # не staros
+        "javascript:alert(1)",
+        "staros://music?tid=1 2",  # пробел
+        'staros://music?tid="1"',  # кавычки
+        "staros://music?tid=1\n2",  # перевод строки
+        "",
+        "staros://",  # пустой остаток
     ],
 )
-def test_deeplink_from_zvuk_url(url, expected):
-    assert _deeplink_from_zvuk_url(url) == expected
+def test_is_valid_deeplink_rejects_garbage(deeplink):
+    assert not _is_valid_deeplink(deeplink)
 
 
-def test_deeplink_from_zvuk_url_invalid():
-    assert _deeplink_from_zvuk_url("https://zvuk.com/") is None
-    assert _deeplink_from_zvuk_url("https://example.com/unknown/1") is None
+# ────────────────── _serialize_track: обложка и часы (аудит #35/#36) ──────
+
+
+def test_serialize_track_uses_fallback_cover_for_bt_radio():
+    """Для BT/радио cover_url(track) пуст — панель получает найденную обложку,
+    как это уже делают media_player и camera."""
+    from sboom_ha.websocket_api import _serialize_track
+
+    from tests._fakes import make_track
+
+    track = make_track(provider=None, release_id=None, artist_ids=[])
+    data = _serialize_track(track, "https://found.example/cover.jpg")
+    assert data["cover_url"] == "https://found.example/cover.jpg"
+
+
+def test_serialize_track_prefers_catalog_cover():
+    from sboom_ha.websocket_api import _serialize_track
+
+    from tests._fakes import make_track
+
+    track = make_track(provider="zvuk", release_id="200")
+    data = _serialize_track(track, "https://found.example/cover.jpg")
+    assert "cdn-image.zvuk.com" in data["cover_url"]
+
+
+def test_serialize_track_exposes_received_ts_ms():
+    """Панель экстраполирует позицию от часов HA (received_ts), а не от часов
+    колонки (position_ts_ms) — тот же класс бага, что чинили в media_player."""
+    from sboom_ha.websocket_api import _serialize_track
+
+    from tests._fakes import make_track
+
+    track = make_track()
+    track.received_ts = 1700000000.5
+    data = _serialize_track(track, None)
+    assert data["received_ts_ms"] == 1700000000500

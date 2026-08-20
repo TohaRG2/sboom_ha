@@ -122,3 +122,42 @@ async def test_fetch_volatile_network_error_leaves_slot_empty(monkeypatch):
     await lm._fetch_volatile("k|v", "T", "A", None, None)
     assert lm._volatile_key is None
     assert lm._volatile is None
+
+
+# ────────── гонка volatile-fetch при смене трека A→B (аудит #33) ──────────
+
+
+@pytest.mark.asyncio
+async def test_stale_volatile_lyrics_discarded_after_track_change(monkeypatch):
+    """Поздний результат для трека A не перезаписывает слот, ожидающий B."""
+    async def fake_fetch(*a, **k):
+        return _lyrics("A lyrics")
+
+    monkeypatch.setattr("sboom_ha.lyrics_manager.fetch_lyrics", fake_fetch)
+    lm = build_coordinator().lyrics
+    track_a = make_track(title="Song A", artists=["X"], track_id=None)
+    track_b = make_track(title="Song B", artists=["X"], track_id=None)
+    lm.maybe_fetch(track_a)   # запланирован fetch A
+    lm._inflight.clear()      # стаб не запускает задачи — имитируем завершение
+    lm.maybe_fetch(track_b)   # трек сменился: актуален B
+    # ...и только теперь долетает поздний результат A:
+    await lm._fetch_volatile(_synthetic_key(track_a), "Song A", "X", None, None)
+    assert lm.current_for(track_a) is None, "стейл-результат A перезаписал слот"
+
+
+@pytest.mark.asyncio
+async def test_stale_cover_result_discarded_after_track_change(monkeypatch):
+    async def fake_fetch(*a, **k):
+        return "https://found.example/a.jpg"
+
+    monkeypatch.setattr("sboom_ha.cover_manager.fetch_cover", fake_fetch)
+    cm = build_coordinator().cover
+    track_a = make_track(title="Song A", artists=["X"], track_id=None,
+                         provider=None, release_id=None, artist_ids=[])
+    track_b = make_track(title="Song B", artists=["X"], track_id=None,
+                         provider=None, release_id=None, artist_ids=[])
+    cm.maybe_fetch(track_a)
+    cm._inflight.clear()
+    cm.maybe_fetch(track_b)
+    await cm._fetch("song a|x", "Song A", "X")
+    assert cm.current_for(track_a) is None, "стейл-обложка A перезаписала слот"

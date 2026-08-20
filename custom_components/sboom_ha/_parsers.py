@@ -286,24 +286,45 @@ def parse_state(raw: bytes) -> SpeakerState | None:
     """
     st = SpeakerState()
     s = raw.decode("utf-8", errors="ignore")
-    idx = s.find("{")
 
-    obj = _extract_json_object(s, idx) if idx >= 0 else None
+    # Байт 0x7b (`{`) может встретиться в бинарном TLV-префиксе — при неудаче
+    # балансировки/парсинга пробуем следующую `{` (ограниченно). Ретраи
+    # (не первый кандидат) принимаются только с маркерными state-ключами:
+    # иначе внутри битого JSON нашёлся бы валидный вложенный объект и
+    # сорвал бы прежний regex-fallback по volume.
     data: dict[str, Any] | None = None
-    if obj is not None:
-        try:
-            parsed = json.loads(obj)
-            if isinstance(parsed, dict):
+    obj: str | None = None
+    idx = s.find("{")
+    first_candidate = True
+    for _ in range(8):
+        if idx < 0:
+            break
+        candidate = _extract_json_object(s, idx)
+        if candidate is not None:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, dict) and (
+                first_candidate
+                or "volume" in parsed
+                or "background_apps" in parsed
+            ):
                 data = parsed
-        except json.JSONDecodeError:
-            data = None
+                obj = candidate
+                break
+        first_candidate = False
+        idx = s.find("{", idx + 1)
 
     if data is not None:
         st.raw_state_json = obj
         volume = data.get("volume")
         if isinstance(volume, dict):
-            if "percent" in volume:
-                st.volume_percent = int(volume["percent"])
+            percent = volume.get("percent")
+            # Мусорный payload (percent=null/строка) не должен ронять парсер:
+            # поле остаётся None, merge в координаторе сохранит прежнее.
+            if isinstance(percent, (int, float)):
+                st.volume_percent = int(percent)
             if "muted" in volume:
                 st.muted = bool(volume["muted"])
         st.device = parse_device_state(data)
@@ -321,49 +342,42 @@ def parse_state(raw: bytes) -> SpeakerState | None:
     return None
 
 
-def _scan_open_brace_backward(s: str, pos: int) -> int:
-    """Backward-скан от pos к ближайшей НЕзакрытой `{` (баланс скобок).
-
-    Возвращает индекс открывающей скобки или -1, если не найдена.
-    """
-    depth = 0
-    for i in range(pos, -1, -1):
-        ch = s[i]
-        if ch == "}":
-            depth += 1
-        elif ch == "{":
-            if depth == 0:
-                return i
-            depth -= 1
-    return -1
+# Ограничение перебора кандидатов-`{` в _find_track_json: защита от
+# патологических payload'ов с тысячами скобок до trackId.
+_TRACK_JSON_CANDIDATES_MAX = 50
 
 
 def _find_track_json(s: str) -> tuple[dict[str, Any], int] | None:
-    """Ищет JSON-объект, содержащий `"trackId":"NNN"`.
+    """Ищет JSON-объект, содержащий `"trackId": NNN` (в кавычках или без).
 
-    Стратегия: regex по trackId → backward-скан к открывающей `{` →
-    forward-балансировка (`_extract_json_object`) → json.loads.
+    Стратегия: regex по trackId → перебор открывающих `{` левее совпадения,
+    от ближайшей к дальним. Кандидат принимается, если string-aware
+    форвард-балансировка (`_extract_json_object`) даёт объект, ОХВАТЫВАЮЩИЙ
+    совпадение, и json.loads возвращает dict с "trackId". Такой перебор не
+    ломается на `{`/`}` внутри строковых полей (название трека/артиста) —
+    в отличие от прежнего backward-скана без строкового контекста.
     Возвращает (объект, позиция его `{` в s) или None.
     """
-    m = re.search(r'"trackId":"\d+"', s)
+    m = re.search(r'"trackId"\s*:\s*"?\d+"?', s)
     if not m:
         return None
 
-    start = _scan_open_brace_backward(s, m.start() - 1)
-    if start < 0:
-        return None
-
-    obj = _extract_json_object(s, start)
-    if obj is None:
-        return None
-    try:
-        data = json.loads(obj)
-    except json.JSONDecodeError:
-        _LOGGER.debug("track JSON parse failed: %s", obj[:200])
-        return None
-    if "trackId" not in data:
-        return None
-    return data, start
+    positions = [i for i, ch in enumerate(s[: m.start()]) if ch == "{"]
+    for start in reversed(positions[-_TRACK_JSON_CANDIDATES_MAX:]):
+        obj = _extract_json_object(s, start)
+        if obj is None or start + len(obj) <= m.end():
+            continue  # не сбалансировался или не охватывает trackId
+        try:
+            data = json.loads(obj)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and "trackId" in data:
+            return data, start
+    _LOGGER.debug(
+        "track JSON parse failed near trackId: %s",
+        s[max(0, m.start() - 80) : m.end()],
+    )
+    return None
 
 
 def _find_outer_player(s: str, start: int) -> dict[str, Any]:

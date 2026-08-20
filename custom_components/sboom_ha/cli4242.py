@@ -107,11 +107,6 @@ def parse_matter_list(text: str) -> list[MatterDevice]:
     return devices
 
 
-def matter_count(text: str) -> int:
-    """Число Matter-устройств из вывода `matter list` (0 для пустого списка)."""
-    return len(parse_matter_list(text))
-
-
 class Cli4242Client:
     """Одноразовые соединения к debug-CLI :4242 (per-poll).
 
@@ -147,11 +142,21 @@ class Cli4242Client:
                 pass
 
     @staticmethod
-    async def _drain(reader: asyncio.StreamReader, timeout: float) -> bytes:
+    async def _drain(
+        reader: asyncio.StreamReader, timeout: float, idle_timeout: float = 0.3
+    ) -> bytes:
+        """Читать до тишины: первый чанк ждём до `timeout`, продолжение —
+        до `idle_timeout` паузы.
+
+        CLI не шлёт EOF/терминатор — конец вывода определяется паузой. Без
+        короткого idle-таймаута каждая команда сжигала бы полный `timeout`
+        после последнего чанка (~3.6 c на CLI-опрос внутри цикла координатора).
+        """
         buf = b""
         try:
-            while True:
-                chunk = await asyncio.wait_for(reader.read(4096), timeout)
+            buf += await asyncio.wait_for(reader.read(4096), timeout)
+            while buf:
+                chunk = await asyncio.wait_for(reader.read(4096), idle_timeout)
                 if not chunk:
                     break
                 buf += chunk

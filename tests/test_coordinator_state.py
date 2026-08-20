@@ -196,3 +196,56 @@ def test_stamp_track_restamps_on_track_change(monkeypatch):
     monkeypatch.setattr("sboom_ha.coordinator.time.monotonic", lambda: t0 + 5)
     next_track = coord._stamp_track(_track_snapshot(track_id="2002"))
     assert next_track.received_monotonic == t0 + 5
+
+
+# ────────── гонка poll vs push/optimistic: last-write-wins (аудит #5) ──────
+
+
+@pytest.mark.asyncio
+async def test_poll_does_not_overwrite_optimistic_state_applied_during_await():
+    """Слайдер громкости во время in-flight poll'а: стейл-ответ get_state
+    (сформированный до команды) не должен откатывать optimistic-значение."""
+    coord = build_coordinator(track=make_track(), state=make_state(volume=50))
+
+    async def slow_get_state(*args, **kwargs):
+        # Пока poll ждёт ответа, пользователь двигает слайдер → optimistic 80.
+        coord.apply_optimistic_state(volume_percent=80)
+        return make_state(volume=30)  # стейл-снимок, сделанный ДО команды
+
+    async def none_meta(*args, **kwargs):
+        return None
+
+    async def no_bt(*args, **kwargs):
+        return []
+
+    coord.client.get_state = slow_get_state
+    coord.client.get_metadata = none_meta
+    coord.client.get_paired_bt_devices = no_bt
+    await coord._refresh_state_and_track(notify=False)
+    assert coord.state.volume_percent == 80, "poll затер более свежее optimistic-значение"
+
+
+@pytest.mark.asyncio
+async def test_poll_does_not_overwrite_track_pushed_during_await():
+    """Push о смене трека во время in-flight get_metadata: стейл-ответ poll'а
+    не должен откатывать свежий трек (и не должен стрелять дубль-событиями)."""
+    fresh = make_track(track_id="NEW", title="Fresh")
+    stale = make_track(track_id="OLD", title="Stale")
+    coord = build_coordinator(track=make_track(track_id="OLD"), state=make_state())
+
+    async def ok_state(*args, **kwargs):
+        return make_state(volume=50)
+
+    async def slow_get_metadata(*args, **kwargs):
+        coord.track = coord._stamp_track(fresh)  # push успел раньше
+        coord._bump_mutations()
+        return stale
+
+    async def no_bt(*args, **kwargs):
+        return []
+
+    coord.client.get_state = ok_state
+    coord.client.get_metadata = slow_get_metadata
+    coord.client.get_paired_bt_devices = no_bt
+    await coord._refresh_state_and_track(notify=False)
+    assert coord.track.track_id == "NEW", "poll затер свежий push-трек стейл-ответом"

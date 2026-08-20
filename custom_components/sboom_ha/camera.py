@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import aiohttp
 from aiohttp import web
@@ -87,6 +88,10 @@ class SboomLyricsCamera(SboomEntity, Camera):
         # Cache: track_id -> готовый idle-JPEG (когда lyrics нет)
         self._idle_jpeg_track: str | None = None
         self._idle_jpeg: bytes | None = None
+        # Негативный кэш неудачного URL: idle-стрим зовёт _fetch_cover_raw
+        # каждый кадр — при лежащем CDN нельзя качать заново раз в секунду.
+        self._cover_fail_url: str | None = None
+        self._cover_fail_until: float = 0.0
 
     # ─────────── Snapshot (для предпросмотра в HA) ───────────
 
@@ -180,7 +185,6 @@ class SboomLyricsCamera(SboomEntity, Camera):
             return
         timeline = lyrics.timeline
         cover_raw = await self._fetch_cover_raw(track)
-        artist = ", ".join(track.artists) if track.artists else None
         last_key: tuple | None = None
         last_pos: float | None = None
 
@@ -190,6 +194,9 @@ class SboomLyricsCamera(SboomEntity, Camera):
             and self.coordinator.current_lyrics() is lyrics
         ):
             track = self.coordinator.track
+            # title/artist/source берём свежими на каждый кадр: для BT/радио track_id
+            # не меняется, а метаданные — да.
+            artist = ", ".join(track.artists) if track.artists else None
             pos = lyrics_position(self.coordinator)
             if pos is None:
                 await asyncio.sleep(1)
@@ -230,7 +237,9 @@ class SboomLyricsCamera(SboomEntity, Camera):
         """Нет synced lyrics — обновляем кадр каждую секунду (для движения прогресс-бара)."""
         track = self.coordinator.track
         track_id = track.track_id if track else None
-        last_sec: int | None = None
+        # Sentinel вместо None: у BT-трека позиции нет (cur_sec=None), и
+        # сравнение None==None не отрисовало бы ни одного кадра.
+        last_sec: object = object()
         while (
             self.coordinator.track
             and self.coordinator.track.track_id == track_id
@@ -269,13 +278,20 @@ class SboomLyricsCamera(SboomEntity, Camera):
         if url is not None:
             if self._cover_cache_url == url and self._cover_raw is not None:
                 return self._cover_raw
-            raw = await self._download_cover(url)
-            if raw is not None:
-                self._cover_cache_url = url
-                self._cover_raw = raw
-                return raw
-        # Обложки нет (или скачать не вышло) → CC0-градиент вместо чёрного экрана.
-        return fallback_cover(_cover_seed(track))
+            if url == self._cover_fail_url and time.monotonic() < self._cover_fail_until:
+                pass  # недавняя неудача — сразу фон-заглушка, без сети
+            else:
+                raw = await self._download_cover(url)
+                if raw is not None:
+                    self._cover_cache_url = url
+                    self._cover_raw = raw
+                    return raw
+                self._cover_fail_url = url
+                self._cover_fail_until = time.monotonic() + 60
+        # Обложки нет (или скачать не вышло) → CC0-градиент вместо чёрного
+        # экрана. Первый вызов читает файлы с диска (lru_cache) — в executor,
+        # чтобы не блокировать event loop.
+        return await asyncio.to_thread(fallback_cover, _cover_seed(track))
 
     async def _download_cover(self, url: str) -> bytes | None:
         try:

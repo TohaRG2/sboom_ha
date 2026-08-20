@@ -23,22 +23,24 @@ class SboomSwitch(SwitchEntityDescription):
     turn_off_fn: Callable[[SboomCoordinator], Awaitable[None]]
 
 
+# Команды идут через единый слой coordinator.async_execute (аудит #18):
+# optimistic-патч и refresh-политика там — переключатели не «отпрыгивают».
 SWITCHES: tuple[SboomSwitch, ...] = (
     SboomSwitch(
         key="shuffle",
         translation_key="shuffle",
         icon="mdi:shuffle-variant",
         is_on_fn=lambda c: c.track.shuffle if c.track else None,
-        turn_on_fn=lambda c: c.client.media_shuffle(True),
-        turn_off_fn=lambda c: c.client.media_shuffle(False),
+        turn_on_fn=lambda c: c.async_execute("shuffle", True),
+        turn_off_fn=lambda c: c.async_execute("shuffle", False),
     ),
     SboomSwitch(
         key="mute",
         translation_key="mute",
         icon="mdi:volume-mute",
         is_on_fn=lambda c: c.state.muted if c.state else None,
-        turn_on_fn=lambda c: c.client.media_mute(),
-        turn_off_fn=lambda c: c.client.media_unmute(),
+        turn_on_fn=lambda c: c.async_execute("mute"),
+        turn_off_fn=lambda c: c.async_execute("unmute"),
     ),
 )
 
@@ -70,11 +72,9 @@ class SboomSwitchEntity(SboomEntity, SwitchEntity):
             self.entity_description.turn_on_fn(self.coordinator),
             action=f"{self.entity_description.key} on",
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs) -> None:
         await self._run_command(
             self.entity_description.turn_off_fn(self.coordinator),
             action=f"{self.entity_description.key} off",
         )
-        await self.coordinator.async_request_refresh()

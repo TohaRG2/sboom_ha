@@ -529,3 +529,30 @@ def test_playback_mode_derivation():
     assert _playback_mode(_coord(SimpleNamespace(media_source="MUSIC", playlist_type="podcast"))) == "podcast"
     assert _playback_mode(_coord(SimpleNamespace(media_source="MUSIC", playlist_type="endless"))) == "wave"
     assert _playback_mode(_coord(SimpleNamespace(media_source="MUSIC", playlist_type="album"))) == "music"
+
+
+# ────────── hardening parse_state: 0x7b в префиксе, мусорный percent (аудит #27/#28) ──
+
+import json  # noqa: E402
+
+
+def test_parse_state_binary_brace_in_prefix_does_not_break_json():
+    """Байт 0x7b (`{`) в бинарном TLV-префиксе не должен срывать извлечение
+    JSON — пробуем следующую `{`."""
+    state_json = json.dumps({"volume": {"percent": 42, "muted": False}})
+    raw = b"\x08{\x03\x99" + state_json.encode()
+    st = parse_state(raw)
+    assert st is not None
+    assert st.volume_percent == 42
+    assert st.muted is False
+    assert st.raw_state_json == state_json
+
+
+def test_parse_state_non_numeric_percent_does_not_crash():
+    """percent=null от колонки не должен превращаться в исключение —
+    поле остаётся None, merge в координаторе сохранит прежнее значение."""
+    raw = json.dumps({"volume": {"percent": None, "muted": True}}).encode()
+    st = parse_state(raw)
+    assert st is not None
+    assert st.volume_percent is None
+    assert st.muted is True

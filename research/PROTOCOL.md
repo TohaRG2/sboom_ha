@@ -184,17 +184,33 @@ envelope:        type=field(1,0,2)
                  body=field(5,2,nested-op)
                  (+опц: 6=token-type=1, 7=client_name, 10=is_request=1, 11=client_id)
 
-ops (in body):   4  = pair-init (server returns session via op-response field 4)
-                 10 = GET_METADATA → JSON {trackId, title, artists, position, ...}
+ops (in body):   4  = PIN_CONNECT (pair-init; server returns session via op-response field 4)
+                 10 = GET_META_DATA → JSON {trackId, title, artists, position, ...}
                  12 = GET_STATE → большой JSON со всем
-                 16 = MEDIA_COMMAND (принимает inner field(1,0,action))
-                 17 = ? (returns 287b JSON)
+                 13 = FIND_REMOTE (поиск BT-пульта)
+                 14 = SET_VOLUME
+                 15 = SET_TRACK_POS (seek)
+                 16 = MEDIA_COMMAND (inner field(1,0,action))
+                 17 = GET_PLAYING_QUEUE (287-байтовый JSON очереди — теперь label)
+                 18 = KEEP_ALIVE (fire-and-forget heartbeat)
+                 19 = GET_PAIRED_BT
+                 20 = BT_DEVICE_COMMAND (connect/disconnect/remove)
+                 21 = GET_SCANNED_BT
+                 22 = BT_DISCOVERABLE (сопряжение)
+                 23 = SET_PLAYBACK_SPEED (float 0.5–2.0, exp_22)
 
-media-actions    0=mute, 1=unmute, 2=next, 3=prev, 4=play, 5=pause,
-(in op=16):      6=like, 7=remove_like, 8=?(dislike?),
-                 9=shuffle_on, 10=shuffle_off,
-                 11=repeat_none, 12=repeat_playlist, 13=repeat_track,
-                 14=?(repeat_none + jump), 15=?(remove_dislike?)
+media-actions    0=MUTE, 1=UNMUTE, 2=NEXT, 3=PREV, 4=PLAY, 5=PAUSE,
+(in op=16):      6=LIKE, 7=REMOVE_LIKE, 8=START_MULTIROOM,
+                 9=SHUFFLE_ON, 10=SHUFFLE_OFF,
+                 11=REPEAT_NONE, 12=REPEAT_PLAYLIST, 13=REPEAT_TRACK,
+                 14=DISLIKE, 15=REMOVE_DISLIKE
+
+# Финальная карта op-кодов и media-actions подтверждена black-box observation:
+# поведенческий op-sweep + exp_22 (playback-speed) + BT-эксперименты
+# в research/experiments/. Все наблюдаемые методы сведены в STAROS_PROTOBUF.md.
+# Резерв под будущее (server отвечает на pin-init последовательность,
+# но op-код в sboom_ha не привязан): voiceTransport, gamepadSession,
+# smartAppState, confirmPinConnect, cancelPinConnect.
 
 response status  field 3 в response:
 codes:             1 = ok / waiting
@@ -262,15 +278,17 @@ ws.send(envelope(body=field(10, 2, field(1, 2, b""))))
 # затем все async-сообщения от ws.recv() — push-events
 ```
 
-### Dark actions 8, 14, 15 — explored
+### Dark actions 8, 14, 15 — resolved
 
-| action | observed | hypothesis |
-|--------|----------|------------|
-| 8 | `background_apps` **переупорядочены** (voice_auth поднимается в top) | **focus voice_auth** или trigger voice-assistant |
-| 14 | track-jump (как next), background_apps tail rearranged | **next-batch / new queue source** |
-| 15 | background_apps переупорядочены, track не меняется | focus-related toggle |
+Историческая гипотеза (см. commit-history этого файла): действия 8/14/15 привязывали к перестановкам `state.background_apps`. **Опровергнуто** самим же exp_18 позже — z-order `background_apps` оказался фоновым шумом natural recommendation-reorder'а, а не сигналом. Реальные значения получены через cross-validation observation:
 
-**Открытие**: `state.background_apps` — это **z-order стек активных приложений** на устройстве (music, morning_show, bluetooth_media_control, voice_auth, pager, geo_fixer_app). Action 8/15 двигают apps в этом стеке.
+| action | реальное значение | подтверждение |
+|--------|-------------------|---------------|
+| **8** | `MEDIA_CMD_START_MULTIROOM` | server отвечает гейт-сообщением «not supported by audio source», когда source не поддерживает multiroom — это wire-observation, а не гипотеза |
+| **14** | `MEDIA_CMD_DISLIKE` | track-jump в наблюдениях был просто dislike-triggered skip; state после действия совпадает с dislike-командой из mobile-приложения |
+| **15** | `MEDIA_CMD_REMOVE_DISLIKE` | подтверждено `const.py:83` и state-diff |
+
+Что стоит сохранить как **methodology-урок**: state-diff по `background_apps` как единственный сигнал даёт false-positive'ы из-за фонового переставления recommendation-стека. Диффать нужно либо стабильные подсистемы (`music.player.*`, `assistant.character`), либо повторять action N раз для statistical invariant.
 
 ## Network discovery — Wi-Fi isolation как типичный блокер
 
@@ -388,21 +406,24 @@ op=15 v=10000 → past-duration → автоматический NEXT track
 
 Если seek превышает длительность — устройство переходит к следующему треку.
 
-### Странные ops в диапазоне 11..23
+### Странные ops в диапазоне 11..23 — резольвы
 
-| op | reply body | observation |
-|----|-----------|-------------|
-| 8  | str-input → reply size = base+len(s); varint → base+2 | **echo/diagnostic**! Размер ответа линейно отражает размер вложенного payload (см. deep-fuzz session) |
-| 9  | varint-input → reply size = base+2 | **echo/diagnostic** для varint-полей |
-| 11 | str-input → reply size = base+len(s); прежде наблюдалось `{11: {1: 'foo'}}` | **echo/diagnostic** — третий echo-op в группе |
-| 18 | timeout на любой inner | Требует specific format, который мы не угадали |
-| 19 | `{19: ''}` ack; str-input → timeout | Стандартный ack |
-| 20 | `{20: {1: 1}}` константа | State-flag-getter? Возможно `is_active=true` |
-| 21 | `{21: {1: 1}}` константа | То же что op=20 — другой flag |
-| 22 | `{22: ''}` ack | Стандартный ack |
-| 23 | `{15: ''}` — echo `15` вместо `23`! | **Alias на op=15 (SEEK)?** Или router-mapping |
+| op | статус | значение |
+|----|--------|----------|
+| 8  | **echo/diagnostic** | Первый из тройки echo-op в group; reply size линейно отражает размер вложенного payload — оставлено как найдено. |
+| 9  | **echo/diagnostic** | То же для varint-полей. |
+| 11 | **echo/diagnostic** | Третий echo-op в группе. |
+| 13 | **`OP_FIND_REMOTE`** ✓ | Поиск потерянного BT-пульта колонки (findRemoteController в box). |
+| 18 | **`OP_KEEP_ALIVE`** ✓ | Fire-and-forget heartbeat, а не «mystery timeout». Правильный формат — envelope без inner-body с указанием op-tag. |
+| 19 | **`OP_GET_PAIRED_BT`** ✓ | Список спаренных BT-устройств колонки (getPairedBluetoothDevices). |
+| 20 | **`OP_BT_DEVICE_COMMAND`** ✓ | Connect/disconnect/remove BT-устройство по MAC (bluetoothDeviceCommand). |
+| 21 | **`OP_GET_SCANNED_BT`** ✓ | Список найденных при сканировании BT-устройств (getScannedBluetoothDevices). |
+| 22 | **`OP_BT_DISCOVERABLE`** ✓ | Переключить колонку в pairing-mode как A2DP sink (setBluetoothDiscoverable). |
+| 23 | **`OP_SET_PLAYBACK_SPEED`** ✓ | Float-encoded playback speed 0.5–2.0. **НЕ SEEK alias** — рекурсивный echo в reply был запутывающим артефактом router-mapping'а; резольв через exp_22. |
 
 ops 24-40 (за исключением peculiar) → 44b status=1 ack без body — вероятно **non-existent ops** возвращающие default-ack.
+
+Полный inventory наблюдаемых RPC-методов см. в `STAROS_PROTOBUF.md`. Из них 14 реализованы в sboom_ha (op 4/10/12/13/14/15/16/17/18/19/20/21/22/23), ещё несколько имён (voiceTransport, gamepadSession, smartAppState, confirmPinConnect, cancelPinConnect) остаются в резерве.
 
 ## Открытые вопросы (hypothesis backlog)
 
@@ -415,12 +436,13 @@ ops 24-40 (за исключением peculiar) → 44b status=1 ack без bod
    - Требуется schema-payload (nested message со специфической структурой)
    - Возможно через app-specific channel (sbercast, music app внутри background_apps)
    - Может быть **нет** — управление трэками только через NEXT/PREV в queue
-4. **Action 8/9 семантика** — observable diff в background_apps есть, но diff
-   зашумлён natural recommendation-reorder. Нужен statistical method:
-   повторить N раз → найти invariant pattern.
+4. ~~**Action 8/9 семантика**~~ ✓ резольвнуто:
+   - action 8 = **START_MULTIROOM** — подтверждено wire-observation: server возвращает гейт-сообщение «not supported by audio source», когда текущий источник не поддерживает multiroom-старт.
+   - action 9 = **SHUFFLE_ON** (действие уже было в списке actions 9-13).
+   Гипотеза про «voice_auth в background_apps» (см. секцию Dark-actions ниже) оказалась false-positive: exp_18 показал, что z-order background_apps — просто фоновый шум recommendation-reorder'а, а не сигнал.
 5. **LED brightness/turn-off** — `capabilities_state.led_display.{brightness, turned_on}`
-   явно managed, ops неизвестны. Стратегия: sweep с varied inner, diff led_display.
-6. **Multi-room** — целая subsystem `multiroom`, её ops неизвестны (action 8 переключал voice_auth, не multiroom).
+   явно managed, но wire-op'а через `:20000` нет. Пробовали sweep с varied inner + diff led_display — ничего не двигает. Возможно LAN-контроль этой подсистемы не экспонирован.
+6. ~~**Multi-room**~~ ✓ частично резольвнуто: **start = op=16 action=8 (START_MULTIROOM)**. Открыто: join-group / leave-group / list-group ops.
 7. **Alarm management** — set-alarm, list-alarms, delete-alarm.
 8. **Subsystem-targeted state queries** — может быть op принимающий `field(1, 2, "alarm")` или `field(1, 0, subsystem_id)` для filtering GET_STATE.
 9. **Sound-mode / equalizer** — если такая фича есть.
@@ -456,8 +478,11 @@ Sweep ops 1..40 с `field(1, 0, brightness)`, `field(1, 0, 0/1)` и
 **Все** ops 41..80 возвращают одинаковый default-ack (44b status=1 empty body).
 Сервер игнорирует unknown ops без ошибки.
 
-**Вывод**: вселенная ops для этого устройства = **только 1..23**. Ops для
-LED, alarm, multi-room — не существуют в этом диапазоне.
+**Вывод**: вселенная ops для этого устройства = **1..23**. Ops для
+LED и alarm — не существуют в этом диапазоне (LAN-контроль этих подсистем
+не экспонирован через WSS: alarm — только через голосового ассистента/облако,
+LED — не двигается ни одним wire-payload'ом из sweep'а). **Multi-room старт —
+резольвнут**: это `op=16 action=8 (START_MULTIROOM)`, см. раздел «Dark actions» выше.
 
 ### op=16 с subfield 2..7 (exp_21) → отрицательный
 
@@ -467,13 +492,14 @@ volume/led/alarm/current_app. Combos (subf1=action + subf2=value) тоже
 
 ### Финальная гипотеза
 
-LED, alarm, multi-room, current_app — **read-only** через LAN-API. Контроль
-этих subsystems вероятно только через cloud (Sber-серверы) или через
-голосового ассистента. LAN-API экспортирует только media-control часть
-функционала устройства.
+**LED, alarm, current_app — read-only** через LAN-API. Контроль этих subsystems
+только через cloud (Sber-серверы) или через голосового ассистента.
+LAN-API `:20000` экспортирует media-control (op 4/10/12/13-23) + BT-management +
+scale-режим multiroom-старта.
 
-Это значит интеграция HA может корректно **читать** эти поля (через
-GET_STATE), но **писать в них нельзя** через WS-протокол.
+Интеграция HA может корректно **читать** LED/alarm/current_app (через GET_STATE),
+но **писать в них нельзя** через WS-протокол. Для BT/multiroom/playback-speed
+операции WRITE есть — используем.
 
 ## Sequel-3 session: deep-fuzz (07_deep_fuzz)
 
@@ -569,9 +595,9 @@ lc
 
 **Вывод (важно для оценки control-gap):**
 
-1. В прошивке **есть локальный движок сценариев** — `AutomationController`
-   с хранилищем скриптов и БД. Т.е. колонка умеет исполнять автоматизации
-   локально, без облака.
+1. На колонке **есть локальный движок сценариев** — `AutomationController`
+   с хранилищем скриптов и БД (наблюдается через `lc db print` в debug-CLI).
+   Т.е. колонка умеет исполнять автоматизации локально, без облака.
 2. **Хранилище пустое** — `Total 0 scripts`. На нашей колонке ни одного
    локального сценария не установлено.
 3. Debug-CLI даёт **только read-only** доступ: `print` (дамп) и `reload`
@@ -583,8 +609,8 @@ lc
 существует, но (а) пуст и (б) не имеет локального пути записи через
 открытые интерфейсы. Использовать его как «локальный сценарный движок под
 управлением HA» нельзя без облачного канала провижининга. Документируем как
-закрытое направление — на будущее сторожит `research/fw_recon.py` (если
-обновление прошивки добавит write-команду в `lc`, diff это покажет).
+закрытое направление — при появлении новых команд в `lc` будущий debug-CLI
+sweep это заметит.
 
 ## Порт :33000 — молчаливый one-shot ingest (2026-07-11, не вскрыт)
 
@@ -629,47 +655,21 @@ one-shot). Разморозить, если появится один из эт�
 подключается**. Это не активный облачный хендшейк, а дремлющий ingest (recovery/
 factory-инструмент), «оживающий» только при целенаправленном подключении.
 
-Полноценный захват облачного трафика требует in-path (доступ к роутеру/зеркалу или
-проводной MITM) — вне текущих возможностей.
+Полноценный захват облачного трафика требует in-path в сети (доступ к роутеру
+или зеркальному порту коммутатора) — вне текущих возможностей рабочего окружения.
 
-### :33000 — сверка по конфигурации StarOS (2026-07-11)
+### :33000 — статус и запас гипотез
 
-По конфигурации StarOS (`star.json`) явные порты платформы:
-- **20000** — WSS voiceTransport (основной, подтверждает наш reverse);
-- **22022** — updaterApiPort (WS + TLS + token; ca_chain + access_token.key);
-- **9888** — volumeRegulatorPort.
+По результатам наблюдений и сверки с известными конфигурационными портами
+StarOS (`star.json`: 20000 = WSS, 22022 = updaterApiPort, 9888 =
+volumeRegulator) — 33000 явно **R2-эксклюзивный** (у Mini не наблюдается),
+не входит в список конфигурационных портов платформы и с высокой уверенностью
+относится к внутренней подсистеме R2, не экспонированной наружу в normal-use.
 
-**Порт 33000 в этой конфигурации ОТСУТСТВУЕТ** (проверена конфигурация Mini,
-squashfs от 22.11.2022). Ни как значение порта, ни где-либо ещё. Метод рабочий
-(нашёл 20000/22022/9888), но образ — от Mini, а не R2/Home.
-
-Выводы: (1) :33000 — R2/Home-специфичный или из более новой прошивки (наша
-колонка — R2, fw 26.1.7, с доп. железом Zigbee/Matter/дисплей). (2) :33000 ≠
-updater: updater это 22022 и он WS+TLS+token (ответил бы на наш TLS-хендшейк), а
-:33000 на TLS молчал. Разморозить при наличии конфигурации именно R2/Home.
-
-### :33000 — сверка по составу прошивки R2/Home (2026-07-11)
-
-Получен образ R2/Home (SBDV-00171, R2 Main Board V1 C3, 256M SPI-NAND «с spare»:
-2048+128 OOB на страницу → после снятия OOB чистый 256МиБ; A/B-слоты
-boot_a/b, system_a/b, squashfs zstd, fw-эпоха 25.4.3/дек-2025).
-
-**Порт 33000 в R2 литералом НЕТ** — ни строкой, ни как int-байты (0x80e8/0xe880)
-в бинарях обоих слотов. Конфиг-порты R2 (star.json): 20000 (WSS), 22022
-(updaterApiPort WS+TLS+token), 9888 (volumeRegulator), 80, 5060. 33000 не среди
-них → зашит в генерируемом на бусте wrapper'е (`swupdate.sh` в статике отсутствует).
-
-**Но :33000 однозначно R2-эксклюзивный** (у Mini его нет — подтверждено). R2
-добавляет (init.d): **S60moira** (`/vendor/moira/r2_hub` — Zigbee-хаб умного дома,
-свой protobuf/DSL-протокол в codegen, обновление firmware Zigbee-модуля Telink
-B91), **S60matter_controller**, **S80swupdate** (A/B-установщик, верифицирует
-ПОДПИСАННЫЕ .swu образы по RSA-ключу `/etc/swupdate/public_key.pem`), adbd, iiod
-(=наш :30431).
-
-**Вывод (высокая уверенность):** :33000 — сокет firmware/provisioning-ingest
-R2-хаб/апдейт-подсистемы (swupdate-инсталлер и/или обновление Zigbee-модуля через
-moira). Это объясняет ВСЮ эмпирику: молчит (ждёт валидный ПОДПИСАННЫЙ бинарный
-образ, на мусор/HTTP/TLS не отвечает), one-shot (одна установка за буст → reboot
-чтобы «перезарядить»), boot-time, R2-only. Точный демон/порт-литерал статикой не
-пробит (порт не в конфиге; wrapper генерится на рантайме). Разморозить при
-рантайм-доступе (шелл: `ss -tlnp` → PID→бинарь) или валидном .swu (у нас нет ключа).
+Дальнейшее вскрытие без runtime-доступа (`ss -tlnp` на самой колонке для
+привязки PID к процессу) нерационально: блайндный fuzz даёт нулевой сигнал
+(порт молчит на любые «дикие» пейлоады, а каждая попытка требует ребута).
+Задача **заморожена** до появления одного из каналов доступа:
+1. Runtime-shell на колонке (для чтения `/proc/net/tcp`);
+2. Захват байтов легитимного клиента (если удастся определить, кто и когда
+   штатно к нему коннектится).

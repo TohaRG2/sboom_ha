@@ -174,3 +174,21 @@ def test_decode_repeated_empty():
 def test_decode_repeated_mixed_tags():
     enc = field(1, 2, b"x") + field(3, 0, 7) + field(1, 2, b"y")
     assert decode_repeated(enc) == {1: [b"x", b"y"], 3: [7]}
+
+
+# ────────── границы decode/decode_repeated на обрезанном payload (аудит #26) ──
+
+
+def test_decode_repeated_truncated_fixed32_not_emitted():
+    data = bytes([(1 << 3) | 5]) + b"\x01\x02"  # fixed32, но байта только 2
+    assert decode_repeated(data) == {}
+
+
+def test_decode_repeated_truncated_length_delimited_not_emitted():
+    data = bytes([(1 << 3) | 2, 10]) + b"abc"  # заявлено 10 байт, есть 3
+    assert decode_repeated(data) == {}
+
+
+def test_decode_truncated_length_delimited_not_emitted():
+    data = bytes([(1 << 3) | 2, 10]) + b"abc"
+    assert decode(data) == {}
